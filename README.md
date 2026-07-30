@@ -1,0 +1,1 @@
+# template-aws-s3-wasm
