@@ -255,6 +255,16 @@ a {
     background: var(--color-accent-dark);
 }
 
+.text-input {
+    min-width: 260px;
+    margin-right: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+}
+
 .link-button {
     padding: 0;
     border: none;
