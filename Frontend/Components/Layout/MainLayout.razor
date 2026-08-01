@@ -1,0 +1,40 @@
+@inherits LayoutComponentBase
+
+<div class="app-shell">
+    <header class="app-header">
+        <a class="app-brand" href="">
+            <span class="app-brand-mark">S3</span>
+            <span class="app-brand-text">
+                <strong>USER FILE PORTAL</strong>
+                <small>S3 + Cognito WASM Template</small>
+            </span>
+        </a>
+
+        <nav class="app-nav">
+            <NavLink href="" Match="NavLinkMatch.All">Home</NavLink>
+            <NavLink href="files">Files</NavLink>
+        </nav>
+
+        <div class="app-header-user">
+            <AuthorizeView>
+                <Authorized>
+                    <span class="app-user-name">@context.User.FindFirst("email")?.Value</span>
+                    <button type="button" class="button" @onclick="SignOutAsync">Sign out</button>
+                </Authorized>
+                <NotAuthorized>
+                    <button type="button" class="button button-primary" @onclick="SignIn">Sign in</button>
+                </NotAuthorized>
+            </AuthorizeView>
+        </div>
+    </header>
+
+    <main class="app-main">
+        @Body
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unexpected error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>

@@ -1,0 +1,19 @@
+@page "/authentication/{action}"
+
+<PageTitle>Authentication | User File Portal</PageTitle>
+
+<section class="panel">
+    <RemoteAuthenticatorView Action="@Action">
+        <LoggingIn>
+            <p class="page-note">Redirecting to the sign-in page...</p>
+        </LoggingIn>
+        <CompletingLoggingIn>
+            <p class="page-note">Completing sign-in...</p>
+        </CompletingLoggingIn>
+        <LogInFailed Context="errorMessage">
+            <h1 class="panel-title">Sign-in failed</h1>
+            <p class="page-error">@errorMessage</p>
+            <p class="panel-sub"><a href="">Back to home</a></p>
+        </LogInFailed>
+    </RemoteAuthenticatorView>
+</section>

@@ -1,0 +1,128 @@
+@page "/files"
+@attribute [Authorize]
+
+<PageTitle>Data | User File Portal</PageTitle>
+
+<section class="panel">
+    <h1 class="panel-title">My data</h1>
+    <p class="panel-sub">Objects under users/@sub/ &mdash; listed and rendered in the browser, readable only by you (enforced by IAM)</p>
+
+    @if (loading)
+    {
+        <p class="page-note">Loading...</p>
+    }
+    else if (error is not null)
+    {
+        <p class="page-error">@error</p>
+        <p class="panel-sub">
+            <button type="button" class="button" @onclick="ReloadAsync">Reload</button>
+        </p>
+    }
+    else if ((files is null) || (files.Count == 0))
+    {
+        <p class="page-note">No files yet. Use scripts/seed-user.ps1 to place sample data.</p>
+    }
+    else
+    {
+        <table class="file-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th class="cell-right">Size</th>
+                    <th>Modified (UTC)</th>
+                    <th>Direct S3 URL</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var file in files)
+                {
+                    <tr class="@(selected == file ? "row-selected" : null)">
+                        <td>
+                            <button type="button" class="link-button" @onclick="() => SelectAsync(file)">@file.Name</button>
+                        </td>
+                        <td class="cell-right">@FormatBytes(file.Size)</td>
+                        <td>@FormatStamp(file.LastModified)</td>
+                        <td>
+                            <a class="direct-link" href="@Repository.ObjectUrl(file.Key)" target="_blank" rel="noopener noreferrer">open raw</a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <p class="panel-note">
+            "open raw" points straight at the S3 object. It returns
+            <code>AccessDenied</code> in a browser even while you are signed in here: the bucket
+            blocks public access, and reads only succeed with a SigV4-signed request carrying
+            the temporary credentials this app obtains for your identity.
+        </p>
+    }
+</section>
+
+@if (selected is not null)
+{
+    <section class="panel panel-detail">
+        <h2 class="panel-title">@selected.Name</h2>
+
+        @if (loadingDetail)
+        {
+            <p class="page-note">Loading...</p>
+        }
+        else if (series is not null)
+        {
+            <dl class="stats">
+                <div class="stat">
+                    <dt>Points</dt>
+                    <dd>@series.Points.Count</dd>
+                </div>
+                <div class="stat">
+                    <dt>Total</dt>
+                    <dd>@FormatValue(series.Total)</dd>
+                </div>
+                <div class="stat">
+                    <dt>Average</dt>
+                    <dd>@FormatValue(series.Average)</dd>
+                </div>
+                <div class="stat">
+                    <dt>Minimum</dt>
+                    <dd>@FormatValue(series.Minimum)</dd>
+                </div>
+                <div class="stat stat-peak">
+                    <dt>Peak</dt>
+                    <dd>@FormatValue(series.Maximum) <small>@series.Peak?.Date.ToString("yyyy-MM-dd")</small></dd>
+                </div>
+            </dl>
+
+            <SeriesChart Series="series" />
+
+            <table class="file-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th class="cell-right">Value</th>
+                        <th>Note</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var point in series.Points)
+                    {
+                        <tr>
+                            <td>@point.Date.ToString("yyyy-MM-dd")</td>
+                            <td class="cell-right">@FormatValue(point.Value)</td>
+                            <td>@point.Note</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        else if (text is not null)
+        {
+            <p class="panel-sub">Not a recognised data series, showing the raw content.</p>
+            <pre class="file-preview">@text</pre>
+        }
+        else
+        {
+            <p class="page-note">This file cannot be rendered as text.</p>
+        }
+    </section>
+}

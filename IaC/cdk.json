@@ -1,0 +1,13 @@
+{
+  "app": "dotnet run",
+  "context": {
+    "dev": {
+      "domainPrefix": "template-s3-wasm-dev",
+      "allowLocalhost": true
+    },
+    "prod": {
+      "domainPrefix": "template-s3-wasm",
+      "allowLocalhost": false
+    }
+  }
+}

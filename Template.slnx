@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path=".gitignore" />
+    <File Path="AGENTS.md" />
+    <File Path="Analyzers.ruleset" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Build.targets" />
+    <File Path="LICENSE" />
+    <File Path="README.md" />
+  </Folder>
+  <Project Path="Frontend/Frontend.csproj" Id="7c1f4a9e-2b3d-4e5f-8a6b-1c2d3e4f5a6b" />
+  <Project Path="IaC/IaC.csproj" Id="d2e8b1c4-9f7a-4d3c-b5e6-a7f8c9d0e1f2" />
+</Solution>

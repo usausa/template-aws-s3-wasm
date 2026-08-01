@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>User File Portal</title>
+    <base href="/" />
+    <link rel="stylesheet" href="css/app.css" />
+</head>
+
+<body>
+    <!-- Shown until the runtime is downloaded. Without this the page stays blank
+         for a few seconds, so the splash cannot be omitted. -->
+    <div id="app">
+        <div class="boot">
+            <div class="boot-title">USER FILE PORTAL</div>
+            <div class="boot-bar"><span></span></div>
+            <div class="boot-note">Loading application</div>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui" data-nosnippet>
+        An unexpected error has occurred.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">🗙</span>
+    </div>
+
+    <script src="_content/Microsoft.AspNetCore.Components.WebAssembly.Authentication/AuthenticationService.js"></script>
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+
+</html>

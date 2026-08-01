@@ -1,0 +1,21 @@
+@* Inline SVG chart. No JavaScript charting library, so the strict CSP needs no exception
+   and the payload stays small. *@
+
+<svg class="chart" viewBox="@ViewBox" role="img" aria-label="@($"{Series.Name} chart")">
+    @foreach (var line in GridLines())
+    {
+        <line class="chart-grid" x1="@F(PadLeft)" y1="@F(line.Y)" x2="@F(Width - PadRight)" y2="@F(line.Y)" />
+    }
+
+    <polygon class="chart-area" points="@AreaPoints()" />
+    <polyline class="chart-line" points="@LinePoints()" />
+
+    @if (Series.PeakIndex >= 0)
+    {
+        <circle class="chart-peak" cx="@F(X(Series.PeakIndex))" cy="@F(Y(Series.Maximum))" r="3.5" />
+    }
+
+    @* SVG <text> cannot be written directly: Razor reserves the <text> tag for its own
+       control-flow escaping, so the axis labels are emitted as pre-built markup. *@
+    @Labels()
+</svg>

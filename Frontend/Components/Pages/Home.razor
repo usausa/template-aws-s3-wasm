@@ -1,0 +1,30 @@
+@page "/"
+
+<PageTitle>Home | User File Portal</PageTitle>
+
+<section class="panel">
+    <h1 class="panel-title">Home</h1>
+
+    <AuthorizeView>
+        <Authorized>
+            <p class="panel-sub">Signed-in user (claims from the ID token)</p>
+            <dl class="claims">
+                <dt>email</dt>
+                <dd>@context.User.FindFirst("email")?.Value</dd>
+                <dt>sub</dt>
+                <dd>@context.User.FindFirst("sub")?.Value</dd>
+            </dl>
+            <p class="panel-sub">
+                Your data lives under users/{sub}/ in S3 and is readable only by you (enforced by IAM).
+                <a href="files">Go to files</a>
+            </p>
+        </Authorized>
+        <NotAuthorized>
+            <p class="panel-sub">
+                Template application that authenticates with Cognito and lets each user read only
+                their own data files in S3.
+            </p>
+            <p class="panel-sub">Use "Sign in" at the top right to continue.</p>
+        </NotAuthorized>
+    </AuthorizeView>
+</section>
