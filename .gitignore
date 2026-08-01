@@ -442,5 +442,5 @@ publish-api/
 
 # Byproduct of the Lambda Annotations source generator, which cannot be turned off. A build
 # target in Backend.csproj deletes it; this is the safety net for build paths that skip the
-# target. Routing and infrastructure live in the CDK stack - do not deploy it (see docs/DESIGN.md).
+# target. Routing and infrastructure live in the CDK stack - do not deploy it (see README.md).
 Backend/serverless.template

@@ -28,7 +28,7 @@ function Write-AppSettings {
         [Parameter(Mandatory = $true)] [string] $Path
     )
 
-    # All values here are public by design (authorization is enforced by IAM; see docs/DESIGN.md).
+    # All values here are public by design (authorization is enforced by IAM; see README.md).
     $settings = [ordered]@{
         Oidc = [ordered]@{
             Authority    = "https://cognito-idp.$Script:Region.amazonaws.com/$($Outputs.UserPoolId)"

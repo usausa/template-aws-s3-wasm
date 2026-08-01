@@ -100,7 +100,7 @@ public sealed class AuthConstruct : Construct
         // IAM policies below use ${aws:PrincipalTag/userId} to allow only the user's own prefix.
         // The classic ${cognito-identity.amazonaws.com:sub} (IdentityId) variable is not used
         // because the IdentityId is only assigned on first login and cannot be correlated by
-        // the system that provisions the data (see docs/DESIGN.md section 3.2).
+        // the system that provisions the data (see README.md).
         _ = new CfnIdentityPoolPrincipalTag(this, "PrincipalTags", new CfnIdentityPoolPrincipalTagProps
         {
             IdentityPoolId = identityPool.Ref,
