@@ -23,7 +23,7 @@ Cognito で認証し、**S3 上の「そのユーザー自身のデータファ�
 | データの書き込み | **参照のみ**。S3 へのデータ配置は別システムが行う前提（検証用のシードスクリプトのみ同梱） |
 | ユーザー登録 | セルフサインアップ無効。**管理者発行のみ** |
 | UI | テンプレートとしての最小限。業務機能は含まない |
-| リージョン | `ap-northeast-1` 固定（変更は `IaC/EnvironmentConfig.cs` と `scripts/common.ps1`） |
+| リージョン | `ap-northeast-1` 固定（変更は `Template.IaC/EnvironmentConfig.cs` と `scripts/common.ps1`） |
 
 ### この構成が向かない条件
 
@@ -194,7 +194,7 @@ sequenceDiagram
 
 ### 事前設定
 
-`IaC/cdk.json` の `context.dev.domainPrefix` を**一意な値**へ変更する。Cognito Managed Login のドメイン名になるため、全 AWS アカウント間で一意である必要がある。
+`Template.IaC/cdk.json` の `context.dev.domainPrefix` を**一意な値**へ変更する。Cognito Managed Login のドメイン名になるため、全 AWS アカウント間で一意である必要がある。
 
 > ⚠️ 小文字英数字とハイフンのみ。予約語 `aws` / `amazon` / `cognito` を**含められない**（含めるとデプロイ時に `InvalidRequest` で失敗する）。リポジトリ名をそのまま使うと引っかかることがある。
 
@@ -205,7 +205,7 @@ sequenceDiagram
 ./scripts/deploy-api.ps1
 
 # 2. インフラをデプロイ
-cd IaC
+cd Template.IaC
 npx --yes aws-cdk@latest bootstrap        # アカウント×リージョンで初回のみ
 npx --yes aws-cdk@latest deploy -c env=dev --outputs-file ../cdk-outputs.dev.json
 cd ..
@@ -242,10 +242,10 @@ cd ..
 
 | 変更した箇所 | 実行するもの |
 |---|---|
-| **Frontend のみ** | `./scripts/deploy-app.ps1 -Env dev` |
-| **Backend（Lambda）** | `./scripts/deploy-api.ps1` → `cd IaC; npx --yes aws-cdk@latest deploy -c env=dev --outputs-file ../cdk-outputs.dev.json` |
-| **IaC** | 同上（Backend を変えていなければ `deploy-api.ps1` は不要） |
-| **IaC を変えて出力値が変わった** | 上記の後に `./scripts/update-appsettings.ps1 -Env dev` と `deploy-app.ps1` |
+| **Template.Frontend のみ** | `./scripts/deploy-app.ps1 -Env dev` |
+| **Template.Backend（Lambda）** | `./scripts/deploy-api.ps1` → `cd Template.IaC; npx --yes aws-cdk@latest deploy -c env=dev --outputs-file ../cdk-outputs.dev.json` |
+| **Template.IaC** | 同上（Template.Backend を変えていなければ `deploy-api.ps1` は不要） |
+| **Template.IaC を変えて出力値が変わった** | 上記の後に `./scripts/update-appsettings.ps1 -Env dev` と `deploy-app.ps1` |
 
 `deploy-app.ps1` は publish 前に `appsettings.Production.json` を cdk outputs から自動生成する（配信された WASM アプリは常に Production 環境として動作するため）。生成物は gitignore 対象。
 
@@ -262,7 +262,7 @@ cd ..
 ## 🧹 削除（片付け）
 
 ```powershell
-cd IaC
+cd Template.IaC
 npx --yes aws-cdk@latest destroy -c env=dev
 ```
 
@@ -278,9 +278,9 @@ npx --yes aws-cdk@latest destroy -c env=dev
 template-aws-s3-wasm/
 ├── .editorconfig / Analyzers.ruleset / Directory.Build.props / Directory.Build.targets
 ├── AGENTS.md / CLAUDE.md                    ← コーディング規約（CLAUDE.md は @AGENTS.md 参照）
-├── Template.slnx                            ← ソリューション (Backend + Frontend + IaC)
+├── Template.slnx                            ← ソリューション (3 プロジェクト)
 │
-├── Backend/                                 ← Lambda (net10.0, マネージド dotnet10 ランタイム)
+├── Template.Backend/                                 ← Lambda (net10.0, マネージド dotnet10 ランタイム)
 │   ├── Startup.cs                           ← [LambdaStartup]。DI コンテナへの登録
 │   ├── Functions/
 │   │   ├── HelloFunction.cs                 ← GET /hello。検証済みクレームを返す
@@ -292,7 +292,7 @@ template-aws-s3-wasm/
 │   ├── Assembly.cs                          ← CLSCompliant + LambdaSerializer 属性
 │   └── GlobalUsing.cs / GlobalSuppressions.cs
 │
-├── Frontend/                                ← Blazor WebAssembly (net10.0)
+├── Template.Frontend/                                ← Blazor WebAssembly (net10.0)
 │   ├── Program.cs                           ← DI 構成
 │   ├── Assembly.cs / GlobalUsing.cs / GlobalSuppressions.cs / Log.cs
 │   ├── Application/
@@ -321,7 +321,7 @@ template-aws-s3-wasm/
 │   ├── Settings/AppSetting.cs               ← appsettings.json の App セクション
 │   └── wwwroot/                             ← index.html（スプラッシュ付き）/ appsettings*.json / css
 │
-├── IaC/                                     ← AWS CDK (C#)。Constructs パッケージとの名前空間衝突を避けフラット構成
+├── Template.IaC/                                     ← AWS CDK (C#)。Constructs パッケージとの名前空間衝突を避けフラット構成
 │   ├── cdk.json                             ← 環境別 context（domainPrefix / allowLocalhost）
 │   ├── Program.cs                           ← App エントリ（-c env=dev|prod）
 │   ├── EnvironmentConfig.cs                 ← context の読み取りとリージョン等の定数
@@ -337,25 +337,25 @@ template-aws-s3-wasm/
 
 ### 主要コンポーネント
 
-**Frontend / Program.cs**
+**Template.Frontend / Program.cs**
 
 - `AWSConfigs.HttpClientFactory` の差し替えを**他のどの AWS 呼び出しよりも前**に行う
 - `AddOidcAuthentication` の設定は appsettings から。`email` スコープのみコード側で追加する（設定ファイルに書くと既定スコープと重複する）
 - 起動時のデータ読み込みは行わない（認証前は資格情報が無いため、ページ表示時に取得する）
 
-**Frontend / AwsCredentialsProvider**
+**Template.Frontend / AwsCredentialsProvider**
 
 - `IAccessTokenProvider.RequestAccessToken()` でセッションの有効性を確保した上で、ID トークンを `OidcTokenAccessor` 経由で取得
 - 匿名クライアントで `GetId` → `GetCredentialsForIdentity`。IdentityId はセッションにキャッシュし、ページ読み込みごとの `GetId` を省く
 - 認証情報は失効 5 分前まで再利用。取得できない場合は例外ではなく `null` を返し、呼び出し側が再ログインへ誘導する
 
-**Frontend / UserFileRepository**
+**Template.Frontend / UserFileRepository**
 
 - `ListAsync(sub)` は継続トークンで全件取得。`ObjectUrl(key)` は画面に出す直リンク（セグメント単位で URL エスケープ）
 - `AmazonS3Client` は認証情報が更新されるまで使い回す
 - sub はクレームから取得してキー組み立てに使うが、**セキュリティ境界は IAM 側**。クライアントでキーを細工しても他ユーザーのデータには到達できない
 
-**IaC の構築順**
+**Template.IaC の構築順**
 
 App Client の callback URL とデータバケットの CORS に CloudFront ドメインが必要なため、**Hosting → Data → Auth → Api** の順に構築し、distribution ドメインと User Pool / Client を引き渡す。Identity Pool は認可の仕組みが見えるよう L1 (`Cfn*`) で構築している。
 
@@ -389,10 +389,10 @@ App Client の callback URL とデータバケットの CORS に CloudFront ド�
 
 | スクリプト | 用途 | 主な引数 |
 |---|---|---|
-| `deploy-api.ps1` | Backend を `publish-api/` へ publish する。CDK がアセットとして取り込むため、**`cdk deploy` の前**に実行する | なし |
+| `deploy-api.ps1` | Template.Backend を `publish-api/` へ publish する。CDK がアセットとして取り込むため、**`cdk deploy` の前**に実行する | なし |
 | `update-appsettings.ps1` | cdk outputs から `appsettings.Development.json` を生成する（ローカル開発用） | `-Env dev\|prod` |
 | `seed-user.ps1` | テストユーザーを作成し、`users/{sub}/` へサンプルデータを配置する。実ユーザーの発行手順もこれに準じる | `-Email` (必須) / `-Env` / `-Password` |
-| `deploy-app.ps1` | Frontend を publish して S3 へ同期し、CloudFront を無効化する。`appsettings.Production.json` の生成も行う | `-Env dev\|prod` |
+| `deploy-app.ps1` | Template.Frontend を publish して S3 へ同期し、CloudFront を無効化する。`appsettings.Production.json` の生成も行う | `-Env dev\|prod` |
 | `common.ps1` | 上記から dot-source される共通処理（cdk outputs の読み取り、appsettings 生成）。**直接実行しない** | — |
 
 いずれも `cdk-outputs.{env}.json` をリポジトリルートから読む。`cdk deploy` 時に `--outputs-file` を付け忘れると動かない。
@@ -401,18 +401,18 @@ App Client の callback URL とデータバケットの CORS に CloudFront ド�
 
 ## 💻 ローカル開発
 
-### Frontend
+### Template.Frontend
 
 ```powershell
-dotnet run --project Frontend
+dotnet run --project Template.Frontend
 ```
 
 `http://localhost:5250` で **dev スタックの実 Cognito / S3 に接続**する（エミュレーターは使わない）。localhost のコールバック URL と CORS 許可は dev 環境にのみ設定されている。
 
-### Lambda
+### Template.Backend (Lambda)
 
 ```bash
-dotnet-lambda-test-tool-10.0 --path Backend
+dotnet-lambda-test-tool-10.0 --path Template.Backend
 ```
 
 Web UI が起動し、イベント JSON を与えてブレークポイントデバッグができる。
@@ -423,11 +423,11 @@ Web UI が起動し、イベント JSON を与えてブレークポイントデ�
 
 ## 🧩 拡張方法
 
-### Lambda 関数を追加する
+### Template.Backend (Lambda) 関数を追加する
 
-1. `Backend/Functions/` に `[LambdaFunction]` を付けたクラスを追加
+1. `Template.Backend/Functions/` に `[LambdaFunction]` を付けたクラスを追加
 2. 新しい Request / Response 型を `FunctionSerializerContext` に追加（`LambdaSerializer` 属性がアセンブリ単位のため）
-3. `IaC/ApiConstruct.cs` の `AddRoute` を 1 行足す
+3. `Template.IaC/ApiConstruct.cs` の `AddRoute` を 1 行足す
 
 ハンドラー名はソースジェネレーターが決める: `{Assembly}::{Namespace}.{Class}_{Method}_Generated::{Method}`
 
@@ -437,7 +437,7 @@ publish 出力は全関数で 1 つを共有する。そのため関数が増え
 
 任意のシステムから `s3://{DataBucket}/users/{sub}/...` へ配置する。`sub` は User Pool のユーザー ID で、`aws cognito-idp admin-get-user` で取得できる。
 
-`date,value,note` ヘッダーの CSV はグラフ + 集計 + 明細テーブルとして描画される。それ以外のテキストは生の内容が表示される（判定は `Frontend/Application/SeriesParser.cs`）。
+`date,value,note` ヘッダーの CSV はグラフ + 集計 + 明細テーブルとして描画される。それ以外のテキストは生の内容が表示される（判定は `Template.Frontend/Application/SeriesParser.cs`）。
 
 > ⚠️ `AdminGetUser` を呼ぶとそのユーザーが MAU としてカウントされ課金対象になる。一覧目的なら `ListUsers` を使う。
 
@@ -520,7 +520,7 @@ Blazor WASM + AWS の組み合わせで実際に踏んだ問題と対処。**流
 
 ### AWS SDK は browser-wasm でそのままでは動かない
 
-2 段階の問題があり、いずれも `AWSConfigs.HttpClientFactory` の差し替え（`Frontend/Application/BrowserHttpClientFactory.cs`）で解決している。
+2 段階の問題があり、いずれも `AWSConfigs.HttpClientFactory` の差し替え（`Template.Frontend/Application/BrowserHttpClientFactory.cs`）で解決している。
 
 1. SDK 既定の HTTP ファクトリが `SocketsHttpHandler` を構成するが、ブラウザでは未対応で `PlatformNotSupportedException` になる。すべての通信は fetch を通す必要があるため `HttpClientHandler` ベースで組む
 2. SDK のアンマーシャラーがレスポンスボディを**同期読み**するが、ブラウザのレスポンスストリームは非同期読みしか対応していない（`net_http_synchronous_reads_not_supported`）。`DelegatingHandler` で事前バッファリングし `MemoryStream` として渡す
@@ -541,13 +541,13 @@ RP-Initiated Logout（`end_session_endpoint`）に対応しておらず、`clien
 
 Identity Pool の `GetCredentialsForIdentity` に渡せるのは **ID トークン**だが、`Microsoft.AspNetCore.Components.WebAssembly.Authentication` の C# API はアクセストークンしか公開していない。そのため `OidcTokenAccessor` が、内部の oidc-client-ts が sessionStorage に保存するキー `oidc.user:{authority}:{clientId}` を直接読んでいる。**.NET のメジャーアップデート時はキー形式の互換を再確認すること。**
 
-### Lambda Annotations は `serverless.template` を生成し、抑止できない
+### Template.Backend (Lambda) Annotations は `serverless.template` を生成し、抑止できない
 
 `[LambdaFunction]` が 1 つでもあれば無条件に生成される（AWS のジェネレーター実装で条件がそうなっており、MSBuild プロパティ等のオプトアウトは無い。手で削除してもフルビルドで再生成される）。
 
-本構成では未使用なうえ、内容（MemorySize 512 / Timeout 30 / **オーソライザーなし**）が実デプロイと食い違うため、誤って `dotnet lambda deploy-serverless` すると**認証なしの重複関数**ができる罠になる。そのため `Backend.csproj` の `RemoveGeneratedServerlessTemplate` ターゲットでビルド後に削除している（`.gitignore` にも保険として登録）。Lambda パッケージには元から混入しない。
+本構成では未使用なうえ、内容（MemorySize 512 / Timeout 30 / **オーソライザーなし**）が実デプロイと食い違うため、誤って `dotnet lambda deploy-serverless` すると**認証なしの重複関数**ができる罠になる。そのため `Template.Backend.csproj` の `RemoveGeneratedServerlessTemplate` ターゲットでビルド後に削除している（`.gitignore` にも保険として登録）。Lambda パッケージには元から混入しない。
 
-### Lambda Annotations はメソッドを static にできない
+### Template.Backend (Lambda) Annotations はメソッドを static にできない
 
 `[LambdaStartup]` の `ConfigureServices` もハンドラーメソッドも、生成コードがインスタンス経由で呼ぶため static にできない。DI を使わない関数でも同様で、CA1822 を局所的に抑止している。フレームワークが形を強制するもので回避手段はない。
 

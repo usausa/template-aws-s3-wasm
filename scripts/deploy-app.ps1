@@ -1,7 +1,7 @@
-# Publish Frontend and deploy it to S3 + CloudFront.
+# Publish Template.Frontend and deploy it to S3 + CloudFront.
 # Usage: ./scripts/deploy-app.ps1 -Env dev
 #
-# Prerequisite: the IaC stack is deployed and cdk-outputs.{env}.json exists at the repository root
+# Prerequisite: the Template.IaC stack is deployed and cdk-outputs.{env}.json exists at the repository root
 # (see common.ps1 for the exact deploy command).
 
 param(
@@ -18,7 +18,7 @@ $bucket = $outputs.AppBucketName
 
 # 1. Write the target environment settings as the Production overlay before publishing
 #    (a published WASM app always runs with the Production environment).
-Write-AppSettings -Outputs $outputs -Path (Join-Path $root 'Frontend/wwwroot/appsettings.Production.json')
+Write-AppSettings -Outputs $outputs -Path (Join-Path $root 'Template.Frontend/wwwroot/appsettings.Production.json')
 
 # 2. Publish. The output directory is wiped first: 'dotnet publish -o' does not clean it, so
 #    fingerprinted assets from earlier builds would otherwise pile up and get uploaded forever.
@@ -27,7 +27,7 @@ if (Test-Path $publishDir) {
     Remove-Item -Recurse -Force $publishDir
 }
 
-dotnet publish (Join-Path $root 'Frontend/Frontend.csproj') -c Release -o $publishDir
+dotnet publish (Join-Path $root 'Template.Frontend/Template.Frontend.csproj') -c Release -o $publishDir
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
 
 $wwwroot = Join-Path $publishDir 'wwwroot'

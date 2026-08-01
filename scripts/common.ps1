@@ -10,7 +10,7 @@ function Get-StackOutputs {
 
     $path = Join-Path $Root "cdk-outputs.$EnvName.json"
     if (-not (Test-Path $path)) {
-        throw "cdk outputs not found: $path`nRun this in the IaC directory: npx --yes aws-cdk@latest deploy -c env=$EnvName --outputs-file ../cdk-outputs.$EnvName.json"
+        throw "cdk outputs not found: $path`nRun this in the Template.IaC directory: npx --yes aws-cdk@latest deploy -c env=$EnvName --outputs-file ../cdk-outputs.$EnvName.json"
     }
 
     $stack = "template-aws-s3-wasm-$EnvName"

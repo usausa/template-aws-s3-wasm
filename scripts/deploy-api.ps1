@@ -1,4 +1,4 @@
-# Publish the Backend Lambda so the CDK stack can pick it up as an asset.
+# Publish the Template.Backend Lambda so the CDK stack can pick it up as an asset.
 # Usage: ./scripts/deploy-api.ps1
 #
 # Run this before 'cdk deploy'. The stack reads publish-api/ from the repository root, so the
@@ -14,9 +14,9 @@ if (Test-Path $publishDir) {
     Remove-Item -Recurse -Force $publishDir
 }
 
-dotnet publish (Join-Path $root 'Backend/Backend.csproj') -c Release -o $publishDir
+dotnet publish (Join-Path $root 'Template.Backend/Template.Backend.csproj') -c Release -o $publishDir
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
 
 Write-Host ''
 Write-Host "Lambda artifact ready: $publishDir"
-Write-Host "Next: cd IaC; npx --yes aws-cdk@latest deploy -c env=dev --outputs-file ../cdk-outputs.dev.json"
+Write-Host "Next: cd Template.IaC; npx --yes aws-cdk@latest deploy -c env=dev --outputs-file ../cdk-outputs.dev.json"

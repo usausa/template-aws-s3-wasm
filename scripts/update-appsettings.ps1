@@ -12,6 +12,6 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $outputs = Get-StackOutputs -Root $root -EnvName $Env
 
-Write-AppSettings -Outputs $outputs -Path (Join-Path $root 'Frontend/wwwroot/appsettings.Development.json')
+Write-AppSettings -Outputs $outputs -Path (Join-Path $root 'Template.Frontend/wwwroot/appsettings.Development.json')
 
-Write-Host "Run 'dotnet run --project Frontend' (http://localhost:5250) to connect to the $Env stack."
+Write-Host "Run 'dotnet run --project Template.Frontend' (http://localhost:5250) to connect to the $Env stack."
