@@ -174,6 +174,8 @@ S3 と異なり、API は**トークンベース**で認可する。Frontend が
 
 **方式選定の理由**: Identity Pool の一時認証情報で Lambda を直接 Invoke する案（S3 と同じ IAM 認可）はインフラ追加が最小だが、**Lambda 側で呼び出し元ユーザーを検証できない**（ペイロードに載せた sub はクライアント申告値）。per-user なサーバー処理へ発展させられないため採用していない。
 
+**SAM を使わない理由**: API は Cognito の User Pool / Client と密結合しているため、IaC を SAM に分割するとスタック間の値の受け渡しとデプロイ順序の制約が生じ、「単一スタック・単一ツールチェーン」という本テンプレートの前提が崩れる。ルーティングも `[HttpApi]` ではなく CDK 側に置き、インフラの記述を 1 箇所に保っている。
+
 **トークン種別の注意**: アプリはアクセストークンを送る（API 認可はアクセストークンの役割で、認証ライブラリの公開 API がそのまま使える）。ただし API Gateway はオーディエンスを `aud` **または** `client_id` クレームで照合するため、**ID トークンを送っても検証は通る**（実測で確認）。トークン種別で拒否したい場合は Lambda 側で `token_use` クレームを確認する必要がある。
 
 ### 3.4 認証〜データ取得シーケンス
@@ -214,7 +216,14 @@ template-aws-s3-wasm/
 ├── AGENTS.md / CLAUDE.md                    ← コーディング規約（CLAUDE.md は @AGENTS.md 参照）
 ├── Template.slnx                            ← ソリューション (Backend + Frontend + IaC)
 ├── Backend/                                 ← Lambda (net10.0, マネージド dotnet10 ランタイム)
-│   ├── Function.cs                          ← 検証済みクレームを返すダミーハンドラー
+│   ├── Startup.cs                           ← [LambdaStartup]。DI コンテナへの登録
+│   ├── Functions/
+│   │   ├── HelloFunction.cs                 ← GET /hello。検証済みクレームを返す
+│   │   └── EchoFunction.cs                  ← POST /echo。JSON ボディを受け取る
+│   ├── Services/InvocationCounter.cs        ← ウォームスタート間で生き残る Singleton
+│   ├── Application/                         ← Claims（クレーム抽出）/ Json（レスポンス生成）
+│   ├── Models/                              ← HelloResponse / EchoModels
+│   ├── FunctionSerializerContext.cs         ← 全関数で共有（LambdaSerializer はアセンブリ単位）
 │   ├── Assembly.cs                          ← CLSCompliant + LambdaSerializer 属性
 │   └── GlobalUsing.cs / GlobalSuppressions.cs
 ├── Frontend/                                ← Blazor WebAssembly (net10.0)
@@ -399,7 +408,25 @@ csproj の方針: `InvariantGlobalization=true`（ICU データを外してペ�
 - `update-appsettings.ps1` はローカル開発用に `appsettings.Development.json` を生成する
 - 生成物はいずれも gitignore 対象
 
-### 6.4 ローカル開発
+### 6.4 Backend の拡張とローカルデバッグ
+
+**関数を増やす**: `Functions/` に `[LambdaFunction]` を付けたクラスを追加し、IaC の `AddRoute` を 1 行足すだけでよい。publish 出力は全関数で 1 つを共有する。
+
+- ハンドラー名はソースジェネレーターが決める: `{Assembly}::{Namespace}.{Class}_{Method}_Generated::{Method}`
+- デプロイパッケージは全関数で共有されるため、関数が増えると各関数のコールドスタートに他関数のコード分も乗る。数個であれば誤差だが、規模が大きくなったらプロジェクト分割 + 共通処理の Core ライブラリ化を検討する
+- `LambdaSerializer` 属性がアセンブリ単位のため、新しい Request / Response 型は `FunctionSerializerContext` に追加する
+
+**Lambda Annotations の使い方と制約**: DI（`[LambdaStartup]` と コンストラクター注入）とラッパー生成のために `[LambdaFunction]` のみを使い、`[HttpApi]` は使わない。ルーティングは CDK 側にある。実装時に判明した制約は 3 点。
+
+- **`serverless.template` がプロジェクト直下に自動生成され、抑止できない**。AWS のジェネレーター実装で「`[LambdaFunction]` が 1 つでもあれば生成する」という条件になっており、MSBuild プロパティなどのオプトアウトは提供されていない（手で削除してもフルビルドで再生成される）。本構成では未使用なうえ、内容（MemorySize 512 / Timeout 30 / オーソライザーなし）が実デプロイと食い違うため、誤って `dotnet lambda deploy-serverless` すると**認証なしの重複関数**ができる罠になる。そのため `Backend.csproj` の `RemoveGeneratedServerlessTemplate` ターゲットでビルド後に削除している（`.gitignore` にも保険として残してある）。Lambda パッケージには元から混入しない
+- **`Startup.ConfigureServices` は static にできない**。生成コードがインスタンス経由で呼ぶため、CA1822 を局所的に抑止している
+- **ハンドラーメソッドも static にできない**。DI を使わない関数でも同様
+
+**ローカルデバッグ**: `dotnet-lambda-test-tool-10.0 --path Backend` で Web UI が起動し、イベント JSON を与えてブレークポイントデバッグができる。
+
+ただしこのツールが再現するのは Lambda ランタイムであって **API Gateway の JWT オーソライザーは再現されない**。ローカルではクレームがテストイベントに書いた値になるため、任意の `sub` でユーザー別処理を検証できる一方、**401 で遮断されること自体はローカルでは確認できない**。認証の遮断は実環境の curl で確認する（README の動作確認の観点を参照）。
+
+### 6.5 ローカル開発
 
 - `dotnet run` で実 dev スタックの Cognito / S3 に接続する（エミュレーターは使わない）
 - そのため dev 環境のみ、App Client の callback / logout URL とデータバケットの CORS に localhost を含める。prod には含めない
@@ -474,6 +501,8 @@ Identity Pool の `GetCredentialsForIdentity` に渡せるのは **ID トーク�
 | prod 環境 | dev のみデプロイ・検証済み。`-c env=prod` は未実行（ドメインプレフィックスの一意性、RETAIN + 削除保護の挙動が実地未確認） |
 | シードの冪等性 | `seed-user.ps1` は配置のみで既存オブジェクトを消さないため、サンプルデータの構成を変えると旧ファイルが残る |
 | ライブラリ内部仕様への依存 | ID トークンを sessionStorage から読む実装（§8.5）は、.NET のメジャーアップデート時に保存キー形式の互換を再確認する必要がある |
+| Annotations 由来の警告抑止 | `[LambdaStartup]` の `ConfigureServices` とハンドラーメソッドが static にできないため、CA1822 を局所的に抑止している（§6.4）。フレームワークが形を強制するもので回避手段はない |
+| CSP の絞り込み | `connect-src` の S3 と API Gateway はリージョン内ワイルドカード。バケット名と API ID はデプロイ後に確定するため、絞るならデプロイ後の書き換えが要る |
 
 ---
 

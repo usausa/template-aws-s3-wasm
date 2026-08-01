@@ -6,48 +6,107 @@
 <section class="panel">
     <h1 class="panel-title">Authenticated API</h1>
     <p class="panel-sub">
-        Calls a Lambda through an API Gateway HTTP API. The access token travels as a bearer
-        header and API Gateway verifies it, so an unauthenticated request is rejected with 401
-        before the function runs.
-    </p>
-
-    <p class="panel-sub">
-        <button type="button" class="button button-primary" disabled="@calling" @onclick="CallAsync">
-            @(calling ? "Calling..." : "Call API")
-        </button>
+        Calls Lambda functions through an API Gateway HTTP API. The access token travels as a
+        bearer header and API Gateway verifies it, so an unauthenticated request is rejected with
+        401 before any function runs.
     </p>
 
     @if (error is not null)
     {
         <p class="page-error">@error</p>
     }
-    else if (response is not null)
+</section>
+
+<section class="panel panel-detail">
+    <h2 class="panel-title">GET /hello</h2>
+    <p class="panel-sub">Returns the identity the authorizer verified.</p>
+
+    <p class="panel-sub">
+        <button type="button" class="button button-primary" disabled="@busy" @onclick="CallHelloAsync">
+            @(busy ? "Calling..." : "Call")
+        </button>
+    </p>
+
+    @if (hello is not null)
     {
         <dl class="stats">
             <div class="stat">
                 <dt>Message</dt>
-                <dd>@response.Message</dd>
+                <dd>@hello.Message</dd>
+            </div>
+            <div class="stat">
+                <dt>Invocation</dt>
+                <dd>@hello.Invocation <small>this environment</small></dd>
             </div>
             <div class="stat">
                 <dt>Elapsed</dt>
-                <dd>@elapsedMs <small>ms</small></dd>
+                <dd>@helloMs <small>ms</small></dd>
             </div>
         </dl>
 
         <dl class="claims">
             <dt>sub</dt>
-            <dd>@response.Sub</dd>
-            <dt>username</dt>
-            <dd>@response.Username</dd>
+            <dd>@hello.Sub</dd>
             <dt>invokedAt</dt>
-            <dd>@response.InvokedAt</dd>
+            <dd>@hello.InvokedAt</dd>
             <dt>requestId</dt>
-            <dd>@response.RequestId</dd>
+            <dd>@hello.RequestId</dd>
         </dl>
 
         <p class="panel-note">
-            <code>sub</code> comes from the claims the API Gateway authorizer verified, not from
-            anything this app sent as data. That is what lets the backend scope work per user.
+            <code>Invocation</code> counts requests served by the current Lambda execution
+            environment. It climbs while the environment stays warm and restarts at 1 when AWS
+            creates a new one.
         </p>
     }
+</section>
+
+<section class="panel panel-detail">
+    <h2 class="panel-title">POST /echo</h2>
+    <p class="panel-sub">Sends a JSON body and returns it with the verified identity.</p>
+
+    <p class="panel-sub">
+        <input class="text-input" type="text" maxlength="200" placeholder="Message to send"
+               @bind="message" @bind:event="oninput" />
+        <button type="button" class="button button-primary"
+                disabled="@(busy || String.IsNullOrWhiteSpace(message))" @onclick="CallEchoAsync">
+            @(busy ? "Calling..." : "Send")
+        </button>
+    </p>
+
+    @if (echo is not null)
+    {
+        <dl class="stats">
+            <div class="stat">
+                <dt>Echoed</dt>
+                <dd>@echo.Message</dd>
+            </div>
+            <div class="stat">
+                <dt>Length</dt>
+                <dd>@echo.Length</dd>
+            </div>
+            <div class="stat">
+                <dt>Elapsed</dt>
+                <dd>@echoMs <small>ms</small></dd>
+            </div>
+        </dl>
+
+        <dl class="claims">
+            <dt>sub</dt>
+            <dd>@echo.Sub</dd>
+            <dt>receivedAt</dt>
+            <dd>@echo.ReceivedAt</dd>
+            <dt>requestId</dt>
+            <dd>@echo.RequestId</dd>
+        </dl>
+    }
+</section>
+
+<section class="panel panel-detail">
+    <p class="panel-note">
+        Both responses carry a <code>sub</code> taken from the claims the API Gateway authorizer
+        verified, not from anything this app sent as data. That is what lets a backend scope its
+        work per user. The two endpoints run as separate Lambda functions built from the same
+        Backend project.
+    </p>
 </section>

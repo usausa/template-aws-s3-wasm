@@ -9,3 +9,6 @@ global using System.Threading.Tasks;
 
 global using Amazon.Lambda.APIGatewayEvents;
 global using Amazon.Lambda.Core;
+
+global using Backend.Application;
+global using Backend.Models;

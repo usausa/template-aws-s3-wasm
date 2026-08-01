@@ -13,10 +13,23 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <!-- The Lambda Annotations source generator writes a serverless.template next to the project
+       whenever any [LambdaFunction] exists, and offers no way to turn that off. This project is
+       deployed by the CDK stack, so that template is not just unused: its contents differ from
+       what is actually deployed (no authorizer, different memory and timeout), which makes
+       'dotnet lambda deploy-serverless' a way to create a second, unauthenticated copy of these
+       functions by accident. Deleting it after each build keeps that trap out of the tree.
+       It is also in .gitignore, in case a build path skips this target. -->
+  <Target Name="RemoveGeneratedServerlessTemplate" AfterTargets="Build">
+    <Delete Files="$(MSBuildProjectDirectory)\serverless.template" />
+  </Target>
+
   <ItemGroup>
+    <PackageReference Include="Amazon.Lambda.Annotations" Version="2.4.0" />
     <PackageReference Include="Amazon.Lambda.APIGatewayEvents" Version="3.0.0" />
     <PackageReference Include="Amazon.Lambda.Core" Version="3.3.0" />
     <PackageReference Include="Amazon.Lambda.Serialization.SystemTextJson" Version="3.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
   </ItemGroup>
 
 </Project>

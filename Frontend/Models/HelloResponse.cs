@@ -9,7 +9,21 @@ public sealed record HelloResponse(
     [property: JsonPropertyName("sub")] string Sub,
     [property: JsonPropertyName("username")] string Username,
     [property: JsonPropertyName("invokedAt")] string InvokedAt,
+    [property: JsonPropertyName("invocation")] int Invocation,
+    [property: JsonPropertyName("requestId")] string RequestId);
+
+// Body sent to POST /echo, and what comes back.
+public sealed record EchoRequest(
+    [property: JsonPropertyName("message")] string Message);
+
+public sealed record EchoResponse(
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("length")] int Length,
+    [property: JsonPropertyName("sub")] string Sub,
+    [property: JsonPropertyName("receivedAt")] string ReceivedAt,
     [property: JsonPropertyName("requestId")] string RequestId);
 
 [JsonSerializable(typeof(HelloResponse))]
+[JsonSerializable(typeof(EchoRequest))]
+[JsonSerializable(typeof(EchoResponse))]
 public sealed partial class ApiSerializerContext : JsonSerializerContext;

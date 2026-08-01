@@ -6,10 +6,15 @@ public sealed partial class Api
     // State
     //--------------------------------------------------------------------------------
 
-    private bool calling;
+    private bool busy;
     private string? error;
-    private HelloResponse? response;
-    private long elapsedMs;
+
+    private HelloResponse? hello;
+    private long helloMs;
+
+    private string message = "Hello from the browser";
+    private EchoResponse? echo;
+    private long echoMs;
 
     //--------------------------------------------------------------------------------
     // Parameter
@@ -19,30 +24,45 @@ public sealed partial class Api
     public ApiClient Client { get; set; } = default!;
 
     [Inject]
-    public NavigationManager Navigation { get; set; } = default!;
-
-    [Inject]
     public ILogger<Api> Log { get; set; } = default!;
 
     //--------------------------------------------------------------------------------
     // Action
     //--------------------------------------------------------------------------------
 
-    private async Task CallAsync()
+    private async Task CallHelloAsync()
     {
-        calling = true;
-        error = null;
-        response = null;
-
         var watch = Stopwatch.StartNew();
+        await CallAsync(async () =>
+        {
+            hello = await Client.GetHelloAsync();
+            helloMs = watch.ElapsedMilliseconds;
+        });
+    }
+
+    private async Task CallEchoAsync()
+    {
+        var watch = Stopwatch.StartNew();
+        await CallAsync(async () =>
+        {
+            echo = await Client.PostEchoAsync(message);
+            echoMs = watch.ElapsedMilliseconds;
+        });
+    }
+
+    // Both calls share the same failure handling: an expired session goes back through sign-in,
+    // anything else is surfaced on the page rather than thrown.
+    private async Task CallAsync(Func<Task> action)
+    {
+        busy = true;
+        error = null;
+
         try
         {
-            response = await Client.GetHelloAsync();
-            elapsedMs = watch.ElapsedMilliseconds;
+            await action();
         }
         catch (AccessTokenNotAvailableException ex)
         {
-            // The session expired before the call; send the user back through sign-in.
             ex.Redirect();
         }
         catch (HttpRequestException ex)
@@ -52,7 +72,7 @@ public sealed partial class Api
         }
         finally
         {
-            calling = false;
+            busy = false;
         }
     }
 }

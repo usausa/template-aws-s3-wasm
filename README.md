@@ -73,6 +73,14 @@ dotnet run --project Frontend
 `http://localhost:5250` で dev スタックの実 Cognito / S3 に接続する（エミュレーターは使わない）。
 localhost のコールバック URL と CORS 許可は dev 環境にのみ設定される。
 
+Lambda は test tool でローカル実行・デバッグできる。
+
+```bash
+dotnet-lambda-test-tool-10.0 --path Backend
+```
+
+再現されるのは Lambda ランタイムのみで API Gateway の認証は含まれないため、クレームはテストイベントに書いた値になる（401 の確認は実環境で行う。詳細は [docs/DESIGN.md](docs/DESIGN.md) §6.4）。
+
 ## 動作確認の観点
 
 - 未ログインで `/files` へアクセス → ログインへリダイレクトされる
@@ -80,7 +88,8 @@ localhost のコールバック URL と CORS 許可は dev 環境にのみ設定
 - 一覧の「open raw」（S3 オブジェクトの直リンク）は、ログイン中でもブラウザで開くと `AccessDenied` になる
   （バケットは公開ブロック済みで、読み取りには SigV4 署名が必要。アプリはその署名を一時認証情報で行っている）
 - ユーザーを 2 人作成し、他ユーザーのキーを指定した取得が AccessDenied になる
-- 「API」ページの呼び出しが成功し、返る `sub` が自分のものになる
+- 「API」ページの 2 つの呼び出し（GET /hello, POST /echo）が成功し、返る `sub` が自分のものになる
+- `/hello` を連続で叩くと `invocation` が増える（同じ実行環境が再利用されている）
 - トークンなしで API を叩くと 401 になり、Lambda が起動しない
   （`curl https://{ApiEndpoint}/hello` → 401。CloudWatch Logs に呼び出し記録が増えないこと）
 - ディープリンクの直接アクセス・リロードが動作する（SPA フォールバック）

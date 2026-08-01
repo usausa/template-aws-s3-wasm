@@ -22,4 +22,13 @@ public sealed class ApiClient
 
     public async Task<HelloResponse?> GetHelloAsync() =>
         await client.GetFromJsonAsync("hello", ApiSerializerContext.Default.HelloResponse);
+
+    public async Task<EchoResponse?> PostEchoAsync(string message)
+    {
+        using var response = await client.PostAsJsonAsync(
+            "echo", new EchoRequest(message), ApiSerializerContext.Default.EchoRequest);
+        response.EnsureSuccessStatusCode();
+
+        return await response.Content.ReadFromJsonAsync(ApiSerializerContext.Default.EchoResponse);
+    }
 }
