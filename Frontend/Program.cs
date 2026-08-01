@@ -35,10 +35,25 @@ builder.Services.AddOidcAuthentication(options =>
     // the Cognito hosts instead, which removes DNS + TLS setup from that request.
 });
 
+// API client. The handler attaches the access token only to URLs under the API endpoint, so it
+// never travels to S3 or Cognito.
+builder.Services.AddScoped(sp =>
+{
+    var handler = new AuthorizationMessageHandler(
+        sp.GetRequiredService<IAccessTokenProvider>(),
+        sp.GetRequiredService<NavigationManager>());
+    return handler.ConfigureHandler(authorizedUrls: [setting.ApiEndpoint]);
+});
+
+builder.Services
+    .AddHttpClient(ApiClient.Name, client => client.BaseAddress = new Uri(setting.ApiEndpoint + "/"))
+    .AddHttpMessageHandler<AuthorizationMessageHandler>();
+
 // Components
 builder.Services.AddScoped<OidcTokenAccessor>();
 builder.Services.AddScoped<AwsCredentialsProvider>();
 builder.Services.AddScoped<SignOutService>();
 builder.Services.AddScoped<UserFileRepository>();
+builder.Services.AddScoped<ApiClient>();
 
 await builder.Build().RunAsync();

@@ -55,6 +55,8 @@ graph LR
         UP[Cognito User Pool<br/>Managed Login<br/>認証: OIDC code+PKCE]
         IP[Cognito Identity Pool<br/>認可: 一時 AWS 認証情報<br/>+ Principal Tag]
         DataBucket[(S3: データバケット<br/>users/&#123;sub&#125;/...<br/>非公開 + CORS)]
+        APIGW[API Gateway HTTP API<br/>Cognito JWT オーソライザー]
+        Fn[Lambda<br/>検証済みクレームを参照]
     end
 
     App -- "① アプリ配信 (匿名)" --> CF
@@ -62,7 +64,11 @@ graph LR
     App -- "② ログイン (リダイレクト)" --> UP
     App -- "③ ID トークン → 一時認証情報" --> IP
     App -- "④ SigV4 署名付き GET/List<br/>(本人プレフィックスのみ IAM 許可)" --> DataBucket
+    App -- "⑤ アクセストークン (Bearer)" --> APIGW
+    APIGW -- "検証済みクレーム付きイベント" --> Fn
 ```
+
+④ と ⑤ は**認可の方式が異なる 2 本のレーン**である。どちらも同じ Cognito サインインから出発するが、権限を評価する主体が違う（S3 は IAM ポリシー、API は API Gateway による JWT 検証）。
 
 ### 2.2 AWS リソース一覧
 
@@ -74,6 +80,8 @@ graph LR
 | Cognito User Pool | 認証（ID 管理） | Managed Login ドメイン、アプリクライアント（シークレットなし、code + PKCE）。セルフサインアップ無効（管理者発行） |
 | Cognito Identity Pool | 認可（AWS 認証情報の払い出し） | 認証済みユーザーのみ。Principal Tag で `sub` クレームをセッションタグへマッピング |
 | IAM ロール（認証済み） | S3 データアクセス権限 | `users/${aws:PrincipalTag/userId}/*` に限定した GetObject / ListBucket |
+| API Gateway (HTTP API) | 認証付き API の入口 | Cognito JWT オーソライザーを API 既定に設定。CORS はアプリオリジンのみ |
+| Lambda | API の処理本体（ダミー） | マネージド `dotnet10` ランタイム。検証済みクレームを参照するだけで、認可判定は持たない |
 
 ### 2.3 主要な設計判断
 
@@ -156,7 +164,19 @@ s3://{data-bucket}/
 }
 ```
 
-### 3.3 認証〜データ取得シーケンス
+### 3.3 API の認可（API Gateway JWT オーソライザー）
+
+S3 と異なり、API は**トークンベース**で認可する。Frontend が `Authorization: Bearer {アクセストークン}` を送り、API Gateway が署名・発行者・オーディエンスを検証する。
+
+- **オーソライザーは API の既定に設定**する。ルート単位で付け忘れる余地をなくすため。合成結果のルートに `AuthorizationType: JWT` が入ることで担保される
+- **Lambda 側に認可ロジックを置かない**。届いた時点で検証済み、という前提が成立していることが重要で、二重に判定を書くとその前提が曖昧になる
+- Lambda はイベントの `RequestContext.Authorizer.Jwt.Claims` からクレームを読む。**クライアントが申告した値ではない**ため、`sub` で処理をユーザー単位に絞ることができる
+
+**方式選定の理由**: Identity Pool の一時認証情報で Lambda を直接 Invoke する案（S3 と同じ IAM 認可）はインフラ追加が最小だが、**Lambda 側で呼び出し元ユーザーを検証できない**（ペイロードに載せた sub はクライアント申告値）。per-user なサーバー処理へ発展させられないため採用していない。
+
+**トークン種別の注意**: アプリはアクセストークンを送る（API 認可はアクセストークンの役割で、認証ライブラリの公開 API がそのまま使える）。ただし API Gateway はオーディエンスを `aud` **または** `client_id` クレームで照合するため、**ID トークンを送っても検証は通る**（実測で確認）。トークン種別で拒否したい場合は Lambda 側で `token_use` クレームを確認する必要がある。
+
+### 3.4 認証〜データ取得シーケンス
 
 ```mermaid
 sequenceDiagram
@@ -192,7 +212,11 @@ sequenceDiagram
 template-aws-s3-wasm/
 ├── .editorconfig / Analyzers.ruleset / Directory.Build.props / Directory.Build.targets
 ├── AGENTS.md / CLAUDE.md                    ← コーディング規約（CLAUDE.md は @AGENTS.md 参照）
-├── Template.slnx                            ← ソリューション (Frontend + IaC)
+├── Template.slnx                            ← ソリューション (Backend + Frontend + IaC)
+├── Backend/                                 ← Lambda (net10.0, マネージド dotnet10 ランタイム)
+│   ├── Function.cs                          ← 検証済みクレームを返すダミーハンドラー
+│   ├── Assembly.cs                          ← CLSCompliant + LambdaSerializer 属性
+│   └── GlobalUsing.cs / GlobalSuppressions.cs
 ├── Frontend/                                ← Blazor WebAssembly (net10.0)
 │   ├── Program.cs                           ← DI 構成
 │   ├── Assembly.cs / GlobalUsing.cs / GlobalSuppressions.cs / Log.cs
@@ -211,11 +235,14 @@ template-aws-s3-wasm/
 │   │   └── Pages/
 │   │       ├── Home.razor                   ← 認証状態とクレーム表示
 │   │       ├── Files.razor(.cs)             ← [Authorize] 一覧・集計・グラフ・明細・直リンク
+│   │       ├── Api.razor(.cs)               ← [Authorize] 認証付き API の呼び出しと結果表示
 │   │       ├── Authentication.razor(.cs)    ← RemoteAuthenticatorView ({action})
 │   │       └── NotFound.razor
 │   ├── Helpers/MediaHelper.cs               ← 描画可否のメディア判定
 │   ├── Models/                              ← UserFile / SeriesPoint / DataSeries
-│   ├── Services/UserFileRepository.cs       ← 自分のプレフィックスの List / Get、直リンク生成
+│   ├── Services/
+│   │   ├── UserFileRepository.cs            ← 自分のプレフィックスの List / Get、直リンク生成
+│   │   └── ApiClient.cs                     ← 認証付き API の呼び出し
 │   ├── Settings/AppSetting.cs               ← appsettings.json の App セクション
 │   └── wwwroot/                             ← index.html（スプラッシュ付き）/ appsettings*.json / css
 ├── IaC/                                     ← AWS CDK (C#)。Constructs パッケージとの名前空間衝突を避けフラット構成
@@ -225,7 +252,8 @@ template-aws-s3-wasm/
 │   ├── Infrastructure.cs                    ← スタック本体（CA1711 対応で 'Stack' サフィックスを避けた命名）
 │   ├── HostingConstruct.cs                  ← アプリバケット + CloudFront
 │   ├── AuthConstruct.cs                     ← User Pool + Client + Domain + Identity Pool + ロール
-│   └── DataConstruct.cs                     ← データバケット + CORS
+│   ├── DataConstruct.cs                     ← データバケット + CORS
+│   └── ApiConstruct.cs                      ← Lambda + HTTP API + JWT オーソライザー + CORS
 ├── scripts/                                 ← common / update-appsettings / seed-user / deploy-app
 ├── docs/DESIGN.md                           ← 本書
 └── README.md                                ← セットアップ手順・ランニングコスト・拡張ポイント
@@ -307,8 +335,11 @@ csproj の方針: `InvariantGlobalization=true`（ICU データを外してペ�
 | HostingConstruct | S3 (app) + CloudFront | BlockPublicAccess.BLOCK_ALL / OAC / defaultRootObject=index.html / 403・404 → `/index.html`(200) / ResponseHeadersPolicy（HSTS, nosniff, frame DENY, Referrer-Policy, CSP）/ HTTP→HTTPS リダイレクト / PriceClass 200（日本を含む最小） |
 | AuthConstruct | User Pool / App Client / Domain / Managed Login Branding / Identity Pool / IAM ロール | selfSignUpEnabled=false / signInAliases=email / クライアントは code+PKCE・シークレットなし / callback・logout URL に CloudFront ドメイン（dev は localhost も）/ Identity Pool は認証済みのみ / Principal Tag `userId ← sub` / 認証済みロール信頼に `sts:TagSession` |
 | DataConstruct | S3 (data) | BlockPublicAccess.BLOCK_ALL / CORS（AllowedOrigins = CloudFront ドメイン + dev のみ localhost, GET/HEAD, ExposeHeaders=ETag）/ `aws:SecureTransport` 強制 / dev は DESTROY + autoDeleteObjects、prod は RETAIN + 削除保護 |
+| ApiConstruct | Lambda + HTTP API + JWT オーソライザー | Runtime `DOTNET_10` / メモリ 256MB / タイムアウト 10s / ログは専用 LogGroup（dev 1 週間・DESTROY）/ オーソライザーを `DefaultAuthorizer` に設定 / CORS はアプリオリジン（dev のみ localhost）・GET・`authorization` ヘッダー許可 |
 
-- **生成順の制約**: App Client の callback URL とデータバケットの CORS に CloudFront ドメインが必要なため、Hosting → Data → Auth の順に構築し、distribution ドメインを引き渡す
+- **生成順の制約**: App Client の callback URL とデータバケットの CORS に CloudFront ドメインが必要なため、Hosting → Data → Auth → Api の順に構築し、distribution ドメインと User Pool / Client を引き渡す
+- **Lambda アセット**: `scripts/deploy-api.ps1` が `publish-api/` へ publish し、CDK は `Code.FromAsset` でそのディレクトリを Zip 化する。CDK 側でビルドしないため Docker は不要
+- **`HttpMethod` の名前衝突**: `Amazon.CDK.AWS.Apigatewayv2` と `Amazon.CDK.AWS.Lambda` の両方が `HttpMethod` を定義するため、using エイリアスで解決している
 - **Identity Pool は L1 (`Cfn*`) で構築**: `CfnIdentityPool` / `CfnIdentityPoolPrincipalTag` / `CfnIdentityPoolRoleAttachment`。認可の仕組みがコード上で見えるようにするため
 - **Outputs**: `CloudFrontDomain` / `DistributionId` / `AppBucketName` / `DataBucketName` / `UserPoolId` / `UserPoolClientId` / `CognitoDomain` / `IdentityPoolId`。`cdk --outputs-file` の JSON をスクリプト群が読む
 
@@ -385,6 +416,7 @@ csproj の方針: `InvariantGlobalization=true`（ICU データを外してペ�
 | CORS | データバケットのみ。オリジンを CloudFront ドメイン（+ dev は localhost）に限定し、GET/HEAD のみ |
 | IAM | 認証済みロールは §3.2 の 2 ステートメントのみ。ワイルドカード禁止。Identity Pool のゲストアクセス無効 |
 | Cognito | セルフサインアップ無効・管理者発行。MFA・脅威保護（Plus プラン）は既定オフで拡張ポイント扱い |
+| API | オーソライザーを API 既定に設定し、認可なしルートを作れないようにする。アクセストークンは `AuthorizationMessageHandler` の `authorizedUrls` により API エンドポイント宛にのみ付与され、S3 や Cognito へは送られない |
 | 秘密情報 | アプリ・リポジトリに秘密情報を置かない（appsettings の値はすべて公開可能値） |
 | 監査 | dev では省略。prod では S3 サーバーアクセスログ / CloudTrail データイベントが拡張ポイント |
 
@@ -437,6 +469,8 @@ Identity Pool の `GetCredentialsForIdentity` に渡せるのは **ID トーク�
 | ページネーション | `ListObjectsV2` は継続トークンで全件取得するが、UI 側の仮想化は行っていない。ファイル数が多い用途では要検討 |
 | CI/CD | GitHub Actions は未同梱。PR で `dotnet build` + `cdk synth`、main への push で GitHub OIDC → ロール Assume → デプロイ、という構成が拡張ポイント |
 | 対話ログインの目視確認 | Managed Login でのパスワード入力〜`login-callback` の一連の流れは、実際のユーザー操作でのみ確認できる。ここだけが未検証 |
+| API のトークン種別 | オーソライザーはアクセストークンと ID トークンのどちらも通す（§3.3）。種別を限定したい場合は Lambda 側で `token_use` を確認する |
+| Lambda のコールドスタート | マネージドランタイムのため初回呼び出しに JIT ウォームアップが乗る（実測 700ms 程度）。詰めるなら Native AOT だが、Windows から Linux 向けにビルドするには実質 Docker が要るため採用していない |
 | prod 環境 | dev のみデプロイ・検証済み。`-c env=prod` は未実行（ドメインプレフィックスの一意性、RETAIN + 削除保護の挙動が実地未確認） |
 | シードの冪等性 | `seed-user.ps1` は配置のみで既存オブジェクトを消さないため、サンプルデータの構成を変えると旧ファイルが残る |
 | ライブラリ内部仕様への依存 | ID トークンを sessionStorage から読む実装（§8.5）は、.NET のメジャーアップデート時に保存キー形式の互換を再確認する必要がある |

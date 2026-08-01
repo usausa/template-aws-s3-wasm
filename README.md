@@ -22,7 +22,8 @@ graph LR
 
 | パス | 内容 |
 |---|---|
-| `Frontend/` | Blazor WebAssembly (net10.0)。OIDC 認証、一時認証情報の取得、データファイルの一覧・集計・グラフ表示 |
+| `Frontend/` | Blazor WebAssembly (net10.0)。OIDC 認証、一時認証情報の取得、データファイルの一覧・集計・グラフ表示、認証付き API の呼び出し |
+| `Backend/` | Lambda (net10.0)。API Gateway JWT オーソライザーの背後で動くダミー API |
 | `IaC/` | AWS CDK (C#)。CloudFront / S3 / Cognito User Pool / Identity Pool / IAM 一式 |
 | `scripts/` | デプロイ・設定反映・テストデータ投入（PowerShell） |
 | `docs/DESIGN.md` | 設計ドキュメント（構成の根拠、実装上の制約） |
@@ -40,21 +41,26 @@ graph LR
 小文字英数字とハイフンのみ使用可能で、予約語 `aws` / `amazon` / `cognito` を含めることはできない（含めるとデプロイ時に InvalidRequest で失敗する）。
 
 ```powershell
-# 1. インフラをデプロイ
+# 1. Lambda の成果物を用意（CDK がアセットとして取り込む）
+./scripts/deploy-api.ps1
+
+# 2. インフラをデプロイ
 cd IaC
 npx --yes aws-cdk@latest bootstrap        # アカウント×リージョンで初回のみ
 npx --yes aws-cdk@latest deploy -c env=dev --outputs-file ../cdk-outputs.dev.json
 cd ..
 
-# 2. ローカル開発用設定へ反映
+# 3. ローカル開発用設定へ反映
 ./scripts/update-appsettings.ps1 -Env dev
 
-# 3. テストユーザー + サンプルデータ投入
+# 4. テストユーザー + サンプルデータ投入
 ./scripts/seed-user.ps1 -Env dev -Email user1@example.com
 
-# 4. アプリをビルドして配信
+# 5. アプリをビルドして配信
 ./scripts/deploy-app.ps1 -Env dev
 ```
+
+Backend を変更したときは 1 → 2 を、Frontend だけなら 5 を実行する。
 
 deploy-app 完了時に表示される URL へアクセスし、seed-user が表示した Email / Password でログインする。
 
@@ -74,6 +80,9 @@ localhost のコールバック URL と CORS 許可は dev 環境にのみ設定
 - 一覧の「open raw」（S3 オブジェクトの直リンク）は、ログイン中でもブラウザで開くと `AccessDenied` になる
   （バケットは公開ブロック済みで、読み取りには SigV4 署名が必要。アプリはその署名を一時認証情報で行っている）
 - ユーザーを 2 人作成し、他ユーザーのキーを指定した取得が AccessDenied になる
+- 「API」ページの呼び出しが成功し、返る `sub` が自分のものになる
+- トークンなしで API を叩くと 401 になり、Lambda が起動しない
+  （`curl https://{ApiEndpoint}/hello` → 401。CloudWatch Logs に呼び出し記録が増えないこと）
 - ディープリンクの直接アクセス・リロードが動作する（SPA フォールバック）
 - トークン失効（60 分放置）後に再ログインへ誘導される
 - `cdk destroy` で dev 環境が残骸なく消える
@@ -84,14 +93,17 @@ localhost のコールバック URL と CORS 許可は dev 環境にのみ設定
 
 | サービス | デモ運用（3 ユーザー・50 PV/月） | 軽い実運用（100 MAU・1,000 PV・5GB 転送） |
 |---|---|---|
-| S3（アプリ 7MB + データ数 KB） | 約 $0.0007 | 約 $0.01 |
+| S3（アプリ + データ数 KB） | 約 $0.0007 | 約 $0.01 |
 | CloudFront | $0（無料枠内） | $0（無料枠内） |
 | Cognito User Pool (Essentials) | $0（無料枠内） | $0（無料枠内） |
 | Cognito Identity Pool | $0（常に無料） | $0（常に無料） |
+| Lambda | $0（常時無料枠内） | $0（常時無料枠内） |
+| API Gateway (HTTP API) | $0.00006（$1.29/100 万リクエスト） | 約 $0.013 |
 | CloudFormation / IAM / ECR（空） | $0 | $0 |
-| **合計** | **実質 $0（1 セント未満）** | **約 $0.01** |
+| **合計** | **実質 $0（1 セント未満）** | **約 $0.02** |
 
-- **無料枠に収まる理由**: CloudFront は月 1TB 転送 + 1,000 万リクエストが恒久無料。Cognito User Pool は Lite / Essentials とも月 10,000 MAU まで恒久無料（Plus は無料枠なし）。Identity Pool の認証情報払い出しは常に無料
+- **無料枠に収まる理由**: CloudFront は月 1TB 転送 + 1,000 万リクエストが恒久無料。Cognito User Pool は Lite / Essentials とも月 10,000 MAU まで恒久無料（Plus は無料枠なし）。Identity Pool の認証情報払い出しは常に無料。Lambda は月 100 万リクエスト + 40 万 GB 秒が恒久無料
+- **API Gateway だけは恒久無料枠がない**（100 万コール無料はアカウント作成から 12 か月限定）。ただし HTTP API は $1.29/100 万リクエストと安く、REST API の $4.25 に対して約 1/3。上表は無料枠を当てにしない前提の額
 - **バケットや Distribution の「存在」自体に固定費はかからない**。CloudFormation スタック・IAM ロールも `AWS::*` のみなら無料
 - **無料枠が全て無くなったと仮定した場合**でもデモ運用で約 $0.09/月、軽い実運用で約 $2.2/月。内訳の大半は Cognito の MAU 課金（$0.015/MAU）で、スケール時の主なコスト要因はここになる
 - **注意点**: `PriceClass 200` は日本を含むため必須（`PriceClass 100` は北米・欧州のみで、日本からは遠いエッジに飛ぶ）。カスタムドメインを追加すると Route 53 ホストゾーンが約 $0.50/月かかる。`AdminGetUser` を呼ぶとそのユーザーが MAU としてカウントされるため、一覧目的なら `ListUsers` を使う

@@ -41,6 +41,7 @@ function Write-AppSettings {
             IdentityPoolId = $Outputs.IdentityPoolId
             CognitoDomain  = $Outputs.CognitoDomain
             DataBucket     = $Outputs.DataBucketName
+            ApiEndpoint    = $Outputs.ApiEndpoint
         }
     }
 

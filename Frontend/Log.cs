@@ -17,4 +17,9 @@ internal static partial class Log
 
     [LoggerMessage(Level = LogLevel.Error, Message = "File operation failed. operation=[{operation}]")]
     public static partial void ErrorFileOperation(this ILogger log, string operation, Exception ex);
+
+    // Api
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "API call failed.")]
+    public static partial void ErrorApiCallFailed(this ILogger log, Exception ex);
 }

@@ -93,9 +93,10 @@ public sealed class HostingConstruct : Construct
     public Distribution Distribution { get; }
 
     // Minimal CSP that lets Blazor WASM run, with connect targets narrowed down.
-    // The S3 entry is a regional wildcard because the bucket name is only known after deploy
-    // (a direct reference would create a circular dependency with the bucket CORS).
-    // Tighten it to the concrete bucket name after deployment if desired.
+    // The S3 and API entries are regional wildcards because the bucket name and API id are only
+    // known after deploy (a direct reference would create a circular dependency with the bucket
+    // CORS and the API, which is built after hosting).
+    // Tighten them to the concrete names after deployment if desired.
     private static string BuildCsp(EnvironmentConfig config)
     {
         var cognitoDomain = $"https://{config.DomainPrefix}.auth.{EnvironmentConfig.Region}.amazoncognito.com";
@@ -104,7 +105,8 @@ public sealed class HostingConstruct : Construct
             $"https://cognito-idp.{EnvironmentConfig.Region}.amazonaws.com " +
             $"https://cognito-identity.{EnvironmentConfig.Region}.amazonaws.com " +
             $"{cognitoDomain} " +
-            $"https://*.s3.{EnvironmentConfig.Region}.amazonaws.com";
+            $"https://*.s3.{EnvironmentConfig.Region}.amazonaws.com " +
+            $"https://*.execute-api.{EnvironmentConfig.Region}.amazonaws.com";
 
         return
             "default-src 'self'; " +

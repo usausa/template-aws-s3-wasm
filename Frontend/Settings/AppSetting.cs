@@ -18,4 +18,7 @@ public sealed class AppSetting
 
     // Bucket holding the per-user data.
     public string DataBucket { get; set; } = string.Empty;
+
+    // Base URL of the authenticated HTTP API (API Gateway).
+    public string ApiEndpoint { get; set; } = string.Empty;
 }

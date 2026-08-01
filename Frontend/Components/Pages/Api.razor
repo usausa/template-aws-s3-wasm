@@ -1,0 +1,53 @@
+@page "/api"
+@attribute [Authorize]
+
+<PageTitle>API | User File Portal</PageTitle>
+
+<section class="panel">
+    <h1 class="panel-title">Authenticated API</h1>
+    <p class="panel-sub">
+        Calls a Lambda through an API Gateway HTTP API. The access token travels as a bearer
+        header and API Gateway verifies it, so an unauthenticated request is rejected with 401
+        before the function runs.
+    </p>
+
+    <p class="panel-sub">
+        <button type="button" class="button button-primary" disabled="@calling" @onclick="CallAsync">
+            @(calling ? "Calling..." : "Call API")
+        </button>
+    </p>
+
+    @if (error is not null)
+    {
+        <p class="page-error">@error</p>
+    }
+    else if (response is not null)
+    {
+        <dl class="stats">
+            <div class="stat">
+                <dt>Message</dt>
+                <dd>@response.Message</dd>
+            </div>
+            <div class="stat">
+                <dt>Elapsed</dt>
+                <dd>@elapsedMs <small>ms</small></dd>
+            </div>
+        </dl>
+
+        <dl class="claims">
+            <dt>sub</dt>
+            <dd>@response.Sub</dd>
+            <dt>username</dt>
+            <dd>@response.Username</dd>
+            <dt>invokedAt</dt>
+            <dd>@response.InvokedAt</dd>
+            <dt>requestId</dt>
+            <dd>@response.RequestId</dd>
+        </dl>
+
+        <p class="panel-note">
+            <code>sub</code> comes from the claims the API Gateway authorizer verified, not from
+            anything this app sent as data. That is what lets the backend scope work per user.
+        </p>
+    }
+</section>

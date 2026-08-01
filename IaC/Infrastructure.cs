@@ -14,6 +14,7 @@ public sealed class Infrastructure : Stack
 
         var data = new DataConstruct(this, "Data", config, appOrigin);
         var auth = new AuthConstruct(this, "Auth", config, appOrigin, data.Bucket);
+        var api = new ApiConstruct(this, "Api", config, appOrigin, auth.UserPool, auth.Client);
 
         //--------------------------------------------------------------------------------
         // Outputs (consumed by scripts/update-appsettings.ps1 and deploy-app.ps1)
@@ -27,5 +28,6 @@ public sealed class Infrastructure : Stack
         _ = new CfnOutput(this, "UserPoolClientId", new CfnOutputProps { Value = auth.Client.UserPoolClientId });
         _ = new CfnOutput(this, "CognitoDomain", new CfnOutputProps { Value = $"https://{config.DomainPrefix}.auth.{EnvironmentConfig.Region}.amazoncognito.com" });
         _ = new CfnOutput(this, "IdentityPoolId", new CfnOutputProps { Value = auth.IdentityPoolId });
+        _ = new CfnOutput(this, "ApiEndpoint", new CfnOutputProps { Value = api.Api.ApiEndpoint! });
     }
 }
