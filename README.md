@@ -116,7 +116,7 @@ dev 環境はバケットの自動削除（autoDeleteObjects）込みで残骸�
 ## 拡張ポイント
 
 - **カスタムドメイン**: CloudFront + ACM と Cognito カスタムドメインを同一サイト（例: `app.example.com` / `auth.example.com`）に置くと、サイレントトークン更新のサードパーティ Cookie 問題も解消する
-- **初回表示の短縮**: 再訪時のキャッシュは最適化済み（[docs/DESIGN.md](docs/DESIGN.md) §6.1）。初回はランタイム一式のダウンロードが支配的なため、さらに縮めるなら AWS SDK を使わず SigV4 を自前実装してペイロードを削る余地がある
+- **起動時間**: AOT・キャッシュ・圧縮は適用済み（[docs/DESIGN.md](docs/DESIGN.md) §6.1–6.2）。さらに縮めるなら AWS SDK を使わず SigV4 を自前実装してペイロードを削る余地がある
 - **CSP 強化**: `connect-src` の S3 をリージョンワイルドカードからデプロイ後のバケット名直書きへ（`IaC/HostingConstruct.cs`）
 - **アップロード対応**: IAM に本人プレフィックスの `s3:PutObject` を追加し、CORS に PUT を許可
 - **CI/CD**: GitHub Actions + OIDC ロールによる自動デプロイ

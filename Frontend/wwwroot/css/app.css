@@ -74,9 +74,13 @@ a {
     font-size: 12px;
 }
 
-/* Same indicator inside the app shell, where the header is already rendered. */
-.boot-inline {
-    min-height: 160px;
+/* Same splash rendered by the app while authentication state resolves. Fixed so it covers
+   the app shell completely and the static-to-rendered hand-off is seamless. */
+.boot-cover {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: var(--color-bg);
 }
 
 /* ---- app shell ---- */

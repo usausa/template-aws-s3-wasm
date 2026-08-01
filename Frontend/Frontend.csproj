@@ -8,6 +8,16 @@
     <!-- The minimal UI has no reason to ship the ICU CJK data (243KB brotli).
          Dates are rendered with fixed invariant-culture formats. -->
     <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Timestamps are displayed as UTC only; drop the bundled timezone database. -->
+    <InvariantTimezone>true</InvariantTimezone>
+
+    <!-- Native-compile on publish. Without AOT the startup work (auth service init,
+         configuration binding, first renders) runs on the IL interpreter, and measurement
+         showed that dominates the time from splash to first page render - network was idle
+         for the whole stretch. AOT grows the download, which the immutable asset caching
+         amortises to the first visit. Publish-only, so the inner dev loop stays fast. -->
+    <RunAOTCompilation>true</RunAOTCompilation>
   </PropertyGroup>
 
   <ItemGroup>

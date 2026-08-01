@@ -67,7 +67,25 @@ aws s3 cp "s3://$bucket/_framework/" "s3://$bucket/_framework/" --recursive `
     --content-type 'text/javascript' --cache-control $immutable --metadata-directive REPLACE | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Setting cache headers on .js failed.' }
 
-# 5. Invalidate the CloudFront cache ('/*' counts as a single path, so this stays within the free tier).
+# 5. CloudFront only compresses objects up to 10 MB, so any bigger asset (the AOT native
+#    runtime is ~19 MB) would ship uncompressed on every first visit and can exceed browser
+#    per-entry cache limits. Replace such objects with their publish-generated Brotli bodies
+#    at the same key. Browsers universally send Accept-Encoding: br over HTTPS, and fetch
+#    integrity checks run over the decoded bytes, so nothing else changes.
+$bigFiles = Get-ChildItem (Join-Path $wwwroot '_framework') -File |
+    Where-Object { ($_.Length -gt 9MB) -and ($_.Extension -in '.wasm', '.js') }
+foreach ($file in $bigFiles) {
+    $brotli = "$($file.FullName).br"
+    if (Test-Path $brotli) {
+        $type = if ($file.Extension -eq '.wasm') { 'application/wasm' } else { 'text/javascript' }
+        aws s3 cp $brotli "s3://$bucket/_framework/$($file.Name)" `
+            --content-encoding br --content-type $type --cache-control $immutable | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Uploading compressed large asset failed.' }
+        Write-Host "Compressed in place: $($file.Name) ($([Math]::Round($file.Length/1MB,1)) MB -> $([Math]::Round((Get-Item $brotli).Length/1MB,1)) MB)"
+    }
+}
+
+# 6. Invalidate the CloudFront cache ('/*' counts as a single path, so this stays within the free tier).
 aws cloudfront create-invalidation --distribution-id $outputs.DistributionId --paths '/*' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'CloudFront invalidation failed.' }
 

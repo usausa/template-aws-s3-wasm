@@ -5,11 +5,15 @@
                 <NotAuthorized>
                     <RedirectToLogin />
                 </NotAuthorized>
-                @* Shown while the authentication state resolves. Kept visually identical to the
-                   startup splash so the two phases read as one continuous load. *@
+                @* The app is not usable until the authentication state has resolved, so keep
+                   showing the exact same splash as index.html. The fixed-position cover hides
+                   the already-rendered layout, making the hand-off from the static splash to
+                   this one invisible. *@
                 <Authorizing>
-                    <div class="boot boot-inline">
+                    <div class="boot boot-cover">
+                        <div class="boot-title">USER FILE PORTAL</div>
                         <div class="boot-bar"><span></span></div>
+                        <div class="boot-note">Loading application</div>
                     </div>
                 </Authorizing>
             </AuthorizeRouteView>

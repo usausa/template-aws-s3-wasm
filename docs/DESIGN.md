@@ -272,7 +272,7 @@ template-aws-s3-wasm/
 | AWSSDK.S3 | ListObjectsV2 / GetObject |
 | Amazon.CDK.Lib / Constructs | IaC |
 
-csproj の方針: `InvariantGlobalization=true`（ICU データを外してペイロード削減）、`BlazorDisableThrowNavigationException=true`、`CodeAnalysisRuleSet=..\Analyzers.ruleset` で警告ゼロ運用。
+csproj の方針: `InvariantGlobalization=true`（ICU データを外してペイロード削減）、`InvariantTimezone=true`（表示は UTC のみのためタイムゾーンデータを外す）、`RunAOTCompilation=true`（§6.2。publish のみ適用）、`BlazorDisableThrowNavigationException=true`、`CodeAnalysisRuleSet=..\Analyzers.ruleset` で警告ゼロ運用。
 
 ### 4.4 設定（wwwroot/appsettings.json）
 
@@ -332,20 +332,21 @@ csproj の方針: `InvariantGlobalization=true`（ICU データを外してペ�
 その他の方針:
 
 - **publish 前に出力ディレクトリを削除する**。`dotnet publish -o` は出力先を掃除しないため、そのままでは過去ビルドのフィンガープリント付きアセットが溜まり続け、すべてアップロードされてしまう（実際に S3 のオブジェクトが 300 個まで増えた）
-- **`.br` / `.gz` はアップロードしない**。S3 をオリジンにした場合コンテンツネゴシエーションは行われず、これらが要求されることはない（実測でリクエスト 0 件）。圧縮は CloudFront の動的圧縮に任せる
+- **`.br` / `.gz` は別オブジェクトとしてはアップロードしない**。S3 をオリジンにした場合コンテンツネゴシエーションは行われず、これらが要求されることはない（実測でリクエスト 0 件）。10MB 以下の圧縮は CloudFront の動的圧縮に任せる
+- **10MB 超のアセットは Brotli 圧縮済みボディを同じキーに配置する**（`Content-Encoding: br`）。CloudFront の動的圧縮は 10MB までしか適用されず、AOT 化した `dotnet.native.wasm`（約 19MB）が非圧縮で配信されてしまうため。ブラウザは HTTPS で例外なく br を受理し、fetch の整合性検証は展開後のバイト列に対して行われるので他に影響はない。実測で 19MB → 3.98MB
 - `.wasm` / `.js` の Content-Type を明示設定する。環境により `application/octet-stream` と判定され、CloudFront の圧縮対象から外れることがあるため
 - デプロイの最後に `create-invalidation --paths "/*"`（`/*` は 1 パス扱いのため実用上は無料枠に収まる）
 
 ### 6.2 起動時間の内訳
 
-初回表示は 2 つの待ちで構成される。画面上は index.html のスプラッシュ → `AuthorizeRouteView` の `Authorizing` の順に切り替わる。
+初回表示は「ダウンロード → ランタイムブート → 認証状態の解決」の 3 つの待ちで構成される。ネットワーク計測（リソース取得の完了時刻）だけでは後半 2 つの CPU 実行が見えない点に注意。実際、当初の計測ではネットワーク完了後もページ表示まで通信ゼロの CPU 実行が数秒〜十数秒続いており、そこが体感の支配要因だった。
 
-| フェーズ | 実測（再訪・キャッシュ有効時） | 支配要因 |
-|---|---|---|
-| ランタイム取得とブート | 起動〜約 550ms | WASM ランタイムのダウンロード（初回のみ約 2.5MB 圧縮後）と Mono の初期化 |
-| 認証状態の解決 | 約 80ms（OIDC ディスカバリー 46ms + サイレント確認 34ms） | Cognito への 2 往復 |
+対処:
 
-認証フェーズは元々短く、体感の遅さは前者（とキャッシュ未活用によるファイル再検証）が主因だった。`Authorizing` の表示はスプラッシュと同じインジケーターにしてあり、2 つの待ちが 1 つの連続した読み込みとして見えるようにしている。
+- **AOT コンパイル**（`RunAOTCompilation=true`、publish のみ）。インタープリターで実行されていた起動時の C# コード（認証サービス初期化・設定バインド・初回レンダリング）をネイティブ wasm にする。ペイロードは増える（非圧縮 7MB → 24MB、転送ベース 2.5MB → 5.4MB）が、immutable キャッシュにより初回限りで、`dotnet build` のローカル開発ループには影響しない
+- **アプリが使用可能になるまでスプラッシュを維持する**。`Authorizing` フラグメントで index.html と同一のスプラッシュを全画面（fixed）で描画し、静的スプラッシュ → Blazor 描画 → 最初のページ、が 1 つの連続した読み込みに見えるようにしている。中途半端に UI の骨格だけ見せない
+
+計測時の注意: 表示フェーズの遷移は DOM のサンプリングで測ること（このリポジトリの検証では 200ms 間隔のポーリングで splash / authorizing / page を判別した）。また非表示タブはブラウザにスロットリングされ、絶対値が大きく出る。
 
 適用済みの無駄削減:
 
@@ -356,10 +357,10 @@ csproj の方針: `InvariantGlobalization=true`（ICU データを外してペ�
 | `AmazonS3Client` を認証情報が変わるまで再利用 | 呼び出しごとのクライアント構築（エンドポイント解決・署名器の初期化）をやめた |
 | フィンガープリント付きアセットの `immutable` 化（§6.1） | 再訪時のリクエストが 71 → 6 件 |
 
-残る余地:
+見送った施策:
 
-- **OIDC ディスカバリー（1 往復）は API 上省略できない。** `OidcProviderOptions.AdditionalProviderParameters` は `string` 値しか受け付けないため、メタデータ文書をインラインで渡せない（§8.7）。preconnect で往復コストを下げるに留めている
-- 初回のペイロードは AWS SDK が大きな割合を占める（`AWSSDK.Core` 584KB + `AWSSDK.S3` 199KB + それが引き込む `System.Private.Xml` 371KB、いずれも圧縮前）。SigV4 を自前実装すれば削れるが、実装量と引き換えになる
+- **OIDC ディスカバリー（1 往復）の省略は API 上できない。** `OidcProviderOptions.AdditionalProviderParameters` は `string` 値しか受け付けないため、メタデータ文書をインラインで渡せない（§8.6）。preconnect で往復コストを下げるに留めている
+- **初回ペイロードの削減は行わない（2026-08-01 決定）。** AWS SDK が大きな割合を占めるが（`AWSSDK.Core` 584KB + `AWSSDK.S3` 199KB + それが引き込む `System.Private.Xml` 371KB、いずれも圧縮前）、SigV4 の自前実装や遅延ロードは実装量と保守コストに見合わないため、SDK をそのまま使う
 
 ### 6.3 環境別設定
 
@@ -435,7 +436,10 @@ Identity Pool の `GetCredentialsForIdentity` に渡せるのは **ID トーク�
 | サイレントトークン更新 | Cognito ドメインがアプリと別サイトのため、サードパーティ Cookie 制限下で iframe 更新が失敗し得る。失敗時は再ログイン誘導で成立させている（60 分セッションを許容）。恒久策はカスタムドメイン（`auth.example.com` を同一サイトに置く） |
 | ページネーション | `ListObjectsV2` は継続トークンで全件取得するが、UI 側の仮想化は行っていない。ファイル数が多い用途では要検討 |
 | CI/CD | GitHub Actions は未同梱。PR で `dotnet build` + `cdk synth`、main への push で GitHub OIDC → ロール Assume → デプロイ、という構成が拡張ポイント |
-| 対話ログインの目視確認 | Managed Login でのパスワード入力〜`login-callback` の一連の流れは、実際のユーザー操作でのみ確認できる |
+| 対話ログインの目視確認 | Managed Login でのパスワード入力〜`login-callback` の一連の流れは、実際のユーザー操作でのみ確認できる。ここだけが未検証 |
+| prod 環境 | dev のみデプロイ・検証済み。`-c env=prod` は未実行（ドメインプレフィックスの一意性、RETAIN + 削除保護の挙動が実地未確認） |
+| シードの冪等性 | `seed-user.ps1` は配置のみで既存オブジェクトを消さないため、サンプルデータの構成を変えると旧ファイルが残る |
+| ライブラリ内部仕様への依存 | ID トークンを sessionStorage から読む実装（§8.5）は、.NET のメジャーアップデート時に保存キー形式の互換を再確認する必要がある |
 
 ---
 
