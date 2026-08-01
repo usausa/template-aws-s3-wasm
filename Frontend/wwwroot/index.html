@@ -6,6 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>User File Portal</title>
     <base href="/" />
+
+    <!-- Warm the TLS connections to Cognito while the runtime is still downloading. Both hosts
+         are hit right after startup (token handling and the credentials exchange), so paying
+         DNS + TCP + TLS here removes it from the critical path.
+         Region-dependent only: update these if the stack moves to another region. -->
+    <link rel="preconnect" href="https://cognito-idp.ap-northeast-1.amazonaws.com" crossorigin />
+    <link rel="preconnect" href="https://cognito-identity.ap-northeast-1.amazonaws.com" crossorigin />
+
     <link rel="stylesheet" href="css/app.css" />
 </head>
 

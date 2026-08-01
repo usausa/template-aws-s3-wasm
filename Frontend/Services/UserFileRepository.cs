@@ -12,11 +12,16 @@ using Frontend.Auth;
 // The sub here is only for key construction and display; the security boundary is IAM.
 // The temporary credentials carry permissions for the caller's own prefix only, so
 // tampering with keys on the client cannot reach other users' data (AccessDenied).
-public sealed class UserFileRepository
+public sealed class UserFileRepository : IDisposable
 {
     private readonly AwsCredentialsProvider credentialsProvider;
     private readonly AppSetting setting;
     private readonly ILogger<UserFileRepository> log;
+
+    // The client is kept alive across calls and only rebuilt when the credentials are renewed.
+    // Constructing one per request repeats endpoint and signer setup for no benefit.
+    private AmazonS3Client? client;
+    private SessionAWSCredentials? clientCredentials;
 
     public UserFileRepository(
         AwsCredentialsProvider credentialsProvider,
@@ -27,6 +32,8 @@ public sealed class UserFileRepository
         this.setting = setting;
         this.log = log;
     }
+
+    public void Dispose() => client?.Dispose();
 
     public static string Prefix(string sub) => $"users/{sub}/";
 
@@ -42,7 +49,7 @@ public sealed class UserFileRepository
 
         var watch = Stopwatch.StartNew();
         var prefix = Prefix(sub);
-        using var client = CreateClient(credentials);
+        var s3 = ResolveClient(credentials);
 
         var files = new List<UserFile>();
         var request = new ListObjectsV2Request
@@ -54,7 +61,7 @@ public sealed class UserFileRepository
         ListObjectsV2Response response;
         do
         {
-            response = await client.ListObjectsV2Async(request);
+            response = await s3.ListObjectsV2Async(request);
             foreach (var s3Object in response.S3Objects ?? [])
             {
                 // Skip the zero-byte object representing the prefix itself (folder placeholder).
@@ -89,8 +96,8 @@ public sealed class UserFileRepository
             return null;
         }
 
-        using var client = CreateClient(credentials);
-        using var response = await client.GetObjectAsync(setting.DataBucket, key);
+        var s3 = ResolveClient(credentials);
+        using var response = await s3.GetObjectAsync(setting.DataBucket, key);
         using var reader = new StreamReader(response.ResponseStream);
         return await reader.ReadToEndAsync();
     }
@@ -103,6 +110,15 @@ public sealed class UserFileRepository
         new($"https://{setting.DataBucket}.s3.{setting.Region}.amazonaws.com/" +
             String.Join('/', key.Split('/').Select(Uri.EscapeDataString)));
 
-    private AmazonS3Client CreateClient(SessionAWSCredentials credentials) =>
-        new(credentials, RegionEndpoint.GetBySystemName(setting.Region));
+    private AmazonS3Client ResolveClient(SessionAWSCredentials credentials)
+    {
+        if (!ReferenceEquals(clientCredentials, credentials) || (client is null))
+        {
+            client?.Dispose();
+            client = new AmazonS3Client(credentials, RegionEndpoint.GetBySystemName(setting.Region));
+            clientCredentials = credentials;
+        }
+
+        return client;
+    }
 }

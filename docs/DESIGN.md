@@ -252,6 +252,7 @@ template-aws-s3-wasm/
 - `ListAsync(sub)`: `ListObjectsV2`（prefix = `users/{sub}/`）。継続トークンで全件取得する
 - `GetTextAsync(key)`: `GetObject`
 - `ObjectUrl(key)`: 画面に出す S3 直リンク。キーはセグメント単位で URL エスケープする
+- `AmazonS3Client` は認証情報が更新されるまで使い回す（`IDisposable`）
 - sub はクレーム（`ClaimsPrincipal` の `sub`）から取得してキー組み立てに使う。**セキュリティ境界は IAM 側**にあり、クライアントでキーを細工しても他ユーザーのデータには到達できない
 
 **データ可視化（Application / Components/Chart）**
@@ -346,10 +347,19 @@ csproj の方針: `InvariantGlobalization=true`（ICU データを外してペ�
 
 認証フェーズは元々短く、体感の遅さは前者（とキャッシュ未活用によるファイル再検証）が主因だった。`Authorizing` の表示はスプラッシュと同じインジケーターにしてあり、2 つの待ちが 1 つの連続した読み込みとして見えるようにしている。
 
-さらに詰める場合の余地:
+適用済みの無駄削減:
 
-- OIDC ディスカバリー（1 往復）は、メタデータをアプリ側に埋め込めば省略できる。ただし Cognito のエンドポイント構成に依存する設定が増えるため、テンプレートとしては採用していない
-- 初回のペイロードは AWS SDK が大きな割合を占める。SigV4 を自前実装すれば削れるが、実装量と引き換えになる
+| 施策 | 効果 |
+|---|---|
+| `index.html` の `preconnect`（cognito-idp / cognito-identity） | ランタイム取得中に DNS + TCP + TLS を済ませる。実測で認証時の接続確立コストが 0 になった |
+| 認証情報プロバイダーが identity id をセッションにキャッシュ | ページ読み込みごとに発生していた `GetId` が消え、Cognito Identity への呼び出しが 2 回 → 1 回。値は資格情報ではない不透明な識別子で、サインアウト時に破棄し、失効時は取り直しにフォールバックする |
+| `AmazonS3Client` を認証情報が変わるまで再利用 | 呼び出しごとのクライアント構築（エンドポイント解決・署名器の初期化）をやめた |
+| フィンガープリント付きアセットの `immutable` 化（§6.1） | 再訪時のリクエストが 71 → 6 件 |
+
+残る余地:
+
+- **OIDC ディスカバリー（1 往復）は API 上省略できない。** `OidcProviderOptions.AdditionalProviderParameters` は `string` 値しか受け付けないため、メタデータ文書をインラインで渡せない（§8.7）。preconnect で往復コストを下げるに留めている
+- 初回のペイロードは AWS SDK が大きな割合を占める（`AWSSDK.Core` 584KB + `AWSSDK.S3` 199KB + それが引き込む `System.Private.Xml` 371KB、いずれも圧縮前）。SigV4 を自前実装すれば削れるが、実装量と引き換えになる
 
 ### 6.3 環境別設定
 
@@ -408,7 +418,11 @@ Managed Login のドメインプレフィックスに `aws` / `amazon` / `cognit
 
 Identity Pool の `GetCredentialsForIdentity` に渡せるのは **ID トークン**だが、`Microsoft.AspNetCore.Components.WebAssembly.Authentication` の C# API はアクセストークンしか公開していない。そのため `OidcTokenAccessor` が、認証ライブラリ内部の oidc-client-ts が sessionStorage に保存するキー `oidc.user:{authority}:{clientId}` を直接読んでいる。**.NET のメジャーアップデート時はキー形式の互換を再確認すること。**
 
-### 8.6 Razor では SVG の `<text>` を直接書けない
+### 8.6 OIDC メタデータはインラインで渡せない
+
+ディスカバリー要求を省くには oidc-client-ts の `metadata` 設定にメタデータ文書を渡せばよいが、Blazor 側の窓口である `OidcProviderOptions.AdditionalProviderParameters` は `IDictionary<string, string>` で、入れ子のオブジェクトを渡せない。文字列化して渡すとクエリパラメーターとして認可 URL に付く恐れがあるため採用していない。`MetadataUrl` も別 URL を指すだけで要求自体は残る。
+
+### 8.7 Razor では SVG の `<text>` を直接書けない
 
 `<text>` は Razor が制御構文のエスケープ用に予約しているため、属性付きで書くとコンパイルエラーになる。`SeriesChart` では軸ラベルのみ組み立て済みマークアップ（`MarkupString`）として出力している。
 

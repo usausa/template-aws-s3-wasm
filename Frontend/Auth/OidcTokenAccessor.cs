@@ -37,6 +37,25 @@ public sealed class OidcTokenAccessor
     // Discards the local session on sign-out.
     public async Task ClearSessionAsync() =>
         await js.InvokeVoidAsync("sessionStorage.removeItem", storageKey);
+
+    //--------------------------------------------------------------------------------
+    // Identity id cache
+    //--------------------------------------------------------------------------------
+    //
+    // The Cognito identity id never changes for a user, but it lives in memory and is lost on
+    // every reload, costing a GetId round trip each time. Caching it in the session removes
+    // that call. It is an opaque identifier, not a credential, and it is dropped on sign-out.
+
+    private const string IdentityIdKey = "aws.identityId";
+
+    public async Task<string?> GetCachedIdentityIdAsync() =>
+        await js.InvokeAsync<string?>("sessionStorage.getItem", IdentityIdKey);
+
+    public async Task SetCachedIdentityIdAsync(string identityId) =>
+        await js.InvokeVoidAsync("sessionStorage.setItem", IdentityIdKey, identityId);
+
+    public async Task ClearCachedIdentityIdAsync() =>
+        await js.InvokeVoidAsync("sessionStorage.removeItem", IdentityIdKey);
 }
 
 // oidc-client-ts User object persisted in sessionStorage (only the fields we need).

@@ -77,18 +77,28 @@ public sealed class AwsCredentialsProvider : IDisposable
                 [$"cognito-idp.{setting.Region}.amazonaws.com/{setting.UserPoolId}"] = idToken,
             };
 
-            // The IdentityId never changes for a user, so resolve it only once.
-            identityId ??= (await client.GetIdAsync(new GetIdRequest
-            {
-                IdentityPoolId = setting.IdentityPoolId,
-                Logins = logins,
-            })).IdentityId;
+            // The identity id never changes for a user, so it is resolved once and then reused
+            // from the session cache, which saves a GetId round trip on every reload.
+            identityId ??= await tokenAccessor.GetCachedIdentityIdAsync();
 
-            var response = await client.GetCredentialsForIdentityAsync(new GetCredentialsForIdentityRequest
+            GetCredentialsForIdentityResponse response;
+            try
             {
-                IdentityId = identityId,
-                Logins = logins,
-            });
+                response = await RequestCredentialsAsync(client, logins);
+            }
+            catch (AmazonCognitoIdentityException)
+            {
+                // A cached id can go stale, for instance when the identity pool is recreated.
+                // Drop it and resolve a fresh one before giving up.
+                if (identityId is null)
+                {
+                    throw;
+                }
+
+                identityId = null;
+                await tokenAccessor.ClearCachedIdentityIdAsync();
+                response = await RequestCredentialsAsync(client, logins);
+            }
 
             credentials = new SessionAWSCredentials(
                 response.Credentials.AccessKeyId,
@@ -102,13 +112,35 @@ public sealed class AwsCredentialsProvider : IDisposable
                 ? serverExpiration.Value.ToUniversalTime()
                 : DateTime.UtcNow.AddMinutes(50);
 
-            log.InfoCredentialsAcquired(identityId, expiration);
+            log.InfoCredentialsAcquired(response.IdentityId, expiration);
             return credentials;
         }
         finally
         {
             gate.Release();
         }
+    }
+
+    // Resolves the identity id when it is not known yet, then exchanges it for credentials.
+    private async Task<GetCredentialsForIdentityResponse> RequestCredentialsAsync(
+        AmazonCognitoIdentityClient client, Dictionary<string, string> logins)
+    {
+        if (identityId is null)
+        {
+            identityId = (await client.GetIdAsync(new GetIdRequest
+            {
+                IdentityPoolId = setting.IdentityPoolId,
+                Logins = logins,
+            })).IdentityId;
+
+            await tokenAccessor.SetCachedIdentityIdAsync(identityId);
+        }
+
+        return await client.GetCredentialsForIdentityAsync(new GetCredentialsForIdentityRequest
+        {
+            IdentityId = identityId,
+            Logins = logins,
+        });
     }
 
     // Called on sign-out to drop the cache deterministically.

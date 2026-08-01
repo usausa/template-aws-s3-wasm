@@ -31,6 +31,7 @@ public sealed class SignOutService
     public async Task SignOutAsync()
     {
         credentialsProvider.Clear();
+        await tokenAccessor.ClearCachedIdentityIdAsync();
         await tokenAccessor.ClearSessionAsync();
 
         var logoutUri = Uri.EscapeDataString(navigation.BaseUri);

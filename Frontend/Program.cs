@@ -29,6 +29,10 @@ builder.Services.AddOidcAuthentication(options =>
     // The default scopes are openid / profile. email is added here instead of in the
     // settings file because configuration binding would append to the defaults.
     options.ProviderOptions.DefaultScopes.Add("email");
+
+    // The OIDC discovery request cannot be avoided: OidcProviderOptions only accepts string
+    // values, so the metadata document cannot be supplied inline. index.html preconnects to
+    // the Cognito hosts instead, which removes DNS + TLS setup from that request.
 });
 
 // Components
