@@ -19,6 +19,9 @@ public sealed class DataConstruct : Construct
 
         Bucket = new Bucket(this, "Bucket", new BucketProps
         {
+            // Name left to CDK. A fixed name would let the CSP list this exact host, but S3 names
+            // are global, so a fixed one collides as soon as the same stack id is deployed to a
+            // second region. Not worth it for the marginal CSP gain (see HostingConstruct).
             BlockPublicAccess = BlockPublicAccess.BLOCK_ALL,
             Encryption = BucketEncryption.S3_MANAGED,
             EnforceSSL = true,

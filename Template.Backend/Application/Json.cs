@@ -2,8 +2,9 @@ namespace Template.Backend.Application;
 
 using System.Text.Json.Serialization.Metadata;
 
-// Builds the API Gateway responses. Kept in one place so every function returns the same shape
-// and headers; CORS headers are not set here because the HTTP API handles them.
+// Builds the API Gateway responses. Kept in one place so every function returns the same shape and
+// headers. No CORS headers: the browser reaches this API through CloudFront on the app's own
+// origin, so the calls are same-origin.
 public static class Json
 {
     public static APIGatewayHttpApiV2ProxyResponse Ok<T>(T payload, JsonTypeInfo<T> typeInfo) =>

@@ -4,8 +4,8 @@ using Amazon.Lambda.Annotations;
 
 // POST /echo - accepts a JSON body and returns it alongside the verified identity.
 //
-// Second endpoint of the template, deliberately different from /hello: it takes a request body
-// and uses a different HTTP method, which also exercises the CORS preflight path.
+// Second endpoint of the template, deliberately different from /hello: it takes a request body and
+// uses a different HTTP method, so the routing and serialization paths are both exercised.
 public sealed class EchoFunction
 {
     private const int MessageLimit = 200;

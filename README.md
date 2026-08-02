@@ -58,7 +58,8 @@ graph LR
     App -- "② ログイン (リダイレクト)" --> UP
     App -- "③ ID トークン → 一時認証情報" --> IP
     App -- "④ SigV4 署名付き GET/List<br/>(本人プレフィックスのみ IAM 許可)" --> DataBucket
-    App -- "⑤ アクセストークン (Bearer)" --> APIGW
+    App -- "⑤ /api/* + アクセストークン (Bearer)" --> CF
+    CF -- "同一オリジンのまま転送" --> APIGW
     APIGW -- "検証済みクレーム付きイベント" --> Fn
 ```
 
@@ -74,7 +75,7 @@ graph LR
 | Cognito User Pool | 認証 | Managed Login、code + PKCE、シークレットなし、セルフサインアップ無効 |
 | Cognito Identity Pool | 認可（AWS 認証情報の払い出し） | 認証済みのみ。Principal Tag で `sub` をセッションタグへマッピング |
 | IAM ロール（認証済み） | S3 データアクセス | `users/${aws:PrincipalTag/userId}/*` に限定 |
-| API Gateway (HTTP API) | 認証付き API の入口 | JWT オーソライザーを API 既定に設定 |
+| API Gateway (HTTP API) | 認証付き API の入口 | JWT オーソライザーを全ルートに適用。CloudFront の `/api/*` ビヘイビア経由で同一オリジンとして呼ばれる |
 | Lambda × 2 | API の処理本体（ダミー） | マネージド `dotnet10` ランタイム |
 
 ### 主要な設計判断
@@ -150,7 +151,9 @@ s3://{data-bucket}/
 
 S3 と異なり、API は**トークンベース**で認可する。`Authorization: Bearer {アクセストークン}` を送り、API Gateway が署名・発行者・オーディエンスを検証する。
 
-- **オーソライザーは API の既定に設定**する。ルート単位で付け忘れる余地をなくすため
+アプリは API を直接ではなく **CloudFront の `/api/*` 経由**で呼ぶ。同一オリジンになるため CORS プリフライトが発生せず、CSP も `'self'` で賄える。CloudFront 側はキャッシュ無効・`Authorization` ヘッダー転送の設定になっている（Host ヘッダーだけは転送しない。API Gateway が自身のドメインを見てルーティングするため）。
+
+- **オーソライザーは全ルートに適用**する。ルート単位で付け忘れる余地をなくすため
 - **Lambda 側に認可ロジックを置かない**。届いた時点で検証済み、という前提が重要で、二重に判定を書くと前提が曖昧になる
 - Lambda はイベントの `RequestContext.Authorizer.Jwt.Claims` からクレームを読む。**クライアント申告値ではない**ため、`sub` で処理をユーザー単位に絞れる
 
@@ -259,6 +262,48 @@ cd ..
 
 ---
 
+## 🌏 デプロイ先を変更する
+
+リージョン・アカウント・スタック名を変える場合に触る箇所。**リージョンとスタック名はコードに定数として散らばっているため、下表を漏れなく直すこと**（一箇所でも漏れるとデプロイは通るのに実行時に失敗する）。
+
+### リージョンを変える
+
+| ファイル | 箇所 |
+|---|---|
+| `Template.IaC/EnvironmentConfig.cs` | `Region` 定数 |
+| `scripts/common.ps1` | `$Script:Region` |
+| `Template.Frontend/wwwroot/index.html` | `preconnect` の 2 行（Cognito のホスト名にリージョンが入る） |
+| `Template.Frontend/wwwroot/appsettings.json` | プレースホルダーのリージョン表記（実値はデプロイ時に自動生成されるので、体裁のみ） |
+
+CSP と CORS のリージョンは `EnvironmentConfig.Region` から組み立てられるため、追加の変更は不要。
+
+その後、新リージョンで `npx --yes aws-cdk@latest bootstrap` を実行してからデプロイする。
+
+### AWS アカウントを変える
+
+1. AWS CLI の認証情報を切り替える（プロファイル指定なら `$env:AWS_PROFILE`）
+2. 新アカウント × リージョンで `bootstrap` を実行
+3. `Template.IaC/cdk.json` の `domainPrefix` を変更する（**Cognito のドメインは全 AWS アカウント間で一意**のため、他アカウントで使用中の名前は取れない）
+
+### スタック名を変える
+
+| ファイル | 箇所 |
+|---|---|
+| `Template.IaC/Program.cs` | スタック ID（`template-aws-s3-wasm-{envName}`） |
+| `scripts/common.ps1` | `$stack` の組み立て（cdk outputs の JSON をこの名前で引く） |
+
+両者がずれると、デプロイは成功するのにスクリプトが outputs を読めなくなる。
+
+### ローカル開発ポートを変える
+
+`Template.Frontend/Properties/launchSettings.json` と `Template.IaC/EnvironmentConfig.cs` の `LocalhostOrigin` を**両方**変更する。後者は dev の Cognito コールバック URL と S3 の CORS 許可オリジンになるため、ずれるとローカルからのログインとデータ取得が失敗する。
+
+### 環境（dev / prod）を増やす
+
+`Template.IaC/cdk.json` の `context` に新しいキーを足し、`domainPrefix` と `allowLocalhost` を定義する。スクリプトの `-Env` は `dev` / `prod` に制限されているため、増やす場合は各スクリプトの `ValidateSet` も更新する。
+
+---
+
 ## 🧹 削除（片付け）
 
 ```powershell
@@ -266,9 +311,16 @@ cd Template.IaC
 npx --yes aws-cdk@latest destroy -c env=dev
 ```
 
-**dev 環境**はバケットの自動削除（`autoDeleteObjects`）と LogGroup の削除込みで、残骸なく消える。
+**dev 環境**はバケットの自動削除（`autoDeleteObjects`）と LogGroup の削除込みで、スタック管理下のリソースは残骸なく消える。ただし `/aws/lambda/{スタック名}-CustomS3AutoDeleteObjects-*` の LogGroup だけは残る。バケットを空にする CDK 内蔵の Lambda が初回実行時に暗黙生成するもので、CloudFormation の管理外にあるため削除対象に含まれない。中身は空でコストもかからないが、気になる場合は手動で削除する。
 
-**prod 環境**はバケット・User Pool が RETAIN + 削除保護のため、スタック削除後にそれらを手動で削除する必要がある。データ保全を優先した意図的な設計。
+**prod 環境**はバケット・User Pool が RETAIN + 削除保護のため、スタック削除後にそれらを手動で削除する必要がある。データ保全を優先した意図的な設計。API の LogGroup も同じく RETAIN なので残る。
+
+```powershell
+# 残骸の確認（スタック削除後）
+aws s3api list-buckets --query "Buckets[?contains(Name,'template-aws-s3-wasm')].Name"
+aws cognito-idp list-user-pools --max-results 60 --query "UserPools[?contains(Name,'template')].[Id,Name]"
+aws logs describe-log-groups --query "logGroups[?contains(logGroupName,'template-aws-s3-wasm')].logGroupName"
+```
 
 ---
 
@@ -329,7 +381,7 @@ template-aws-s3-wasm/
 │   ├── HostingConstruct.cs                  ← アプリバケット + CloudFront
 │   ├── AuthConstruct.cs                     ← User Pool + Client + Domain + Identity Pool + ロール
 │   ├── DataConstruct.cs                     ← データバケット + CORS
-│   └── ApiConstruct.cs                      ← Lambda + HTTP API + JWT オーソライザー + CORS
+│   └── ApiConstruct.cs                      ← Lambda + HTTP API + JWT オーソライザー
 │
 ├── scripts/                                 ← 下記「scripts 一覧」参照
 └── README.md                                ← 本書
@@ -357,7 +409,7 @@ template-aws-s3-wasm/
 
 **Template.IaC の構築順**
 
-App Client の callback URL とデータバケットの CORS に CloudFront ドメインが必要なため、**Hosting → Data → Auth → Api** の順に構築し、distribution ドメインと User Pool / Client を引き渡す。Identity Pool は認可の仕組みが見えるよう L1 (`Cfn*`) で構築している。
+構築順は参照の連鎖で決まり、**Api（本体のみ）→ Hosting → Data → Auth → Api（ルート追加）** となる。CloudFront の `/api/*` オリジンに API のホスト名が要り、App Client の callback URL とデータバケットの CORS に CloudFront ドメインが要り、JWT オーソライザーに App Client が要る、という依存関係のため。`ApiConstruct` を「本体だけ先に作り、あとから `AddRoutes` でルートとオーソライザーを足す」2 段構えにしているのは、この連鎖を循環させないため（`AWS::ApiGatewayV2::Api` 自体は何にも依存しない）。Identity Pool は認可の仕組みが見えるよう L1 (`Cfn*`) で構築している。
 
 ### 設定ファイル（wwwroot/appsettings.json）
 
@@ -374,7 +426,7 @@ App Client の callback URL とデータバケットの CORS に CloudFront ド�
     "IdentityPoolId": "ap-northeast-1:xxxxxxxx-...",
     "CognitoDomain": "https://{prefix}.auth.ap-northeast-1.amazoncognito.com",
     "DataBucket": "{data-bucket-name}",
-    "ApiEndpoint": "https://{apiId}.execute-api.ap-northeast-1.amazonaws.com"
+    "ApiEndpoint": "https://{distribution}.cloudfront.net/api"
   }
 }
 ```
@@ -452,7 +504,6 @@ publish 出力は全関数で 1 つを共有する。そのため関数が増え
 | アップロード対応 | IAM に本人プレフィックスの `s3:PutObject` を追加し、データバケットの CORS に PUT を許可する |
 | カスタムドメイン | CloudFront + ACM と Cognito カスタムドメインを同一サイト（`app.example.com` / `auth.example.com`）に置く。サイレントトークン更新のサードパーティ Cookie 問題も解消する |
 | CI/CD | GitHub Actions + OIDC ロール。PR で `dotnet build` + `cdk synth`、main への push でデプロイ |
-| CSP 強化 | `connect-src` の S3 / API Gateway をリージョンワイルドカードから具体名へ（デプロイ後に確定するため書き換えが要る） |
 | Cognito | MFA、脅威保護（Plus プラン）、招待メールによるユーザー発行 |
 | 監査 | S3 サーバーアクセスログ / CloudTrail データイベント |
 
@@ -502,13 +553,28 @@ publish 出力は全関数で 1 つを共有する。そのため関数が増え
 | 項目 | 方針 |
 |---|---|
 | トークン保管 | Blazor WASM Authentication 既定（sessionStorage）。XSS 対策として CSP を必須とし、外部スクリプトを読み込まない |
-| CSP | `default-src 'self'` を基本に、`connect-src` を Cognito / S3 / API Gateway に限定。`script-src` は `'self' 'wasm-unsafe-eval'`、`frame-ancestors 'none'`。S3 と API のホストはデプロイ後に確定するためリージョン内ワイルドカード |
+| CSP | `default-src 'self'` を基本に、`connect-src` を Cognito / S3 / API Gateway に限定。`script-src` は `'self' 'wasm-unsafe-eval'`（外部・インラインとも不可）、`frame-ancestors 'none'`。S3 と API Gateway はリージョン内ワイルドカード（理由は下記） |
 | S3（両バケット） | パブリックアクセス全ブロック + `aws:SecureTransport` 強制 + SSE-S3 |
 | CORS | データバケットのみ。オリジンを CloudFront ドメイン（+ dev は localhost）に限定 |
 | IAM | 認証済みロールは 2 ステートメントのみ。ワイルドカード禁止。Identity Pool のゲストアクセス無効 |
 | Cognito | セルフサインアップ無効・管理者発行 |
 | API | オーソライザーを API 既定に設定し、認可なしルートを作れないようにする。アクセストークンは `AuthorizationMessageHandler` の `authorizedUrls` により **API エンドポイント宛にのみ**付与され、S3 や Cognito へは送られない |
 | 秘密情報 | アプリ・リポジトリに秘密情報を置かない |
+
+### CSP のワイルドカードについて（意図的な選択）
+
+`connect-src` のうち S3 と API Gateway は `https://*.s3.{region}.amazonaws.com` のようなリージョン内ワイルドカードにしてある。具体的なホスト名に絞ることは**技術的には可能だが採用していない**。
+
+**API は対応済み**で、CloudFront 配下に置くことで `'self'` に含まれるようになった（同時に CORS プリフライトも不要になった）。
+
+**S3 を絞れない理由**: バケット名はデプロイ後に確定し、CloudFront から参照すると循環依存になる（バケットの CORS 設定が、この CloudFront のドメインを必要とするため）。絞るには次のいずれかが要る。
+
+| 手段 | 副作用 |
+|---|---|
+| バケット名を固定する | S3 の名前はグローバルに一意。同じスタック ID を別リージョンへ展開すると衝突する |
+| 2 回デプロイする | 「一連のコマンドで完了する」というテンプレートの前提が崩れる |
+
+**ワイルドカードで許容できる理由**: この指定でも「同一リージョンの S3 以外のあらゆるホスト」は遮断されている。そして `connect-src` はあくまで多層防御の一枚であり、**スクリプトの実行自体を止めているのは `script-src`** で、こちらは外部スクリプトもインラインも一切許可していない。攻撃者がスクリプトを実行できて初めて `connect-src` の差が問題になるが、その前段が塞がれている。設定変更のたびに書き換えが必要になる維持コストに見合わないと判断した。
 
 > ⚠️ **SPA フォールバックの副作用**: 403 → `index.html` (200) 変換により、アプリバケットに対する実際のアクセス拒否もアプリ画面として返る。仕様として許容している。
 
@@ -579,6 +645,7 @@ Identity Pool の `GetCredentialsForIdentity` に渡せるのは **ID トーク�
 - **無料枠に収まる理由**: CloudFront は月 1TB 転送 + 1,000 万リクエストが恒久無料。Cognito User Pool は Lite / Essentials とも月 10,000 MAU まで恒久無料（Plus は無料枠なし）。Identity Pool は常に無料。Lambda は月 100 万リクエスト + 40 万 GB 秒が恒久無料
 - **API Gateway だけは恒久無料枠がない**（100 万コール無料はアカウント作成から 12 か月限定）。ただし HTTP API は $1.29/100 万リクエストで、REST API の $4.25 に対して約 1/3。上表は無料枠を当てにしない前提の額
 - **バケットや Distribution の「存在」自体に固定費はかからない**
+- API 呼び出しは CloudFront を経由するため CloudFront のリクエスト数にも計上されるが、月 1,000 万リクエストの無料枠があるので上表は変わらない
 - **無料枠が全て無くなったと仮定しても**デモ運用で約 $0.09/月、軽い実運用で約 $2.2/月。大半は Cognito の MAU 課金（$0.015/MAU）で、スケール時の主なコスト要因はここ
 - `PriceClass 200` は日本を含むため必須（`PriceClass 100` は北米・欧州のみで、日本からは遠いエッジに飛ぶ）
 - カスタムドメインを追加すると Route 53 ホストゾーンが約 $0.50/月かかる
@@ -594,7 +661,7 @@ Identity Pool の `GetCredentialsForIdentity` に渡せるのは **ID トーク�
 | Lambda のコールドスタート | マネージドランタイムのため初回呼び出しに JIT ウォームアップが乗る（実測 700ms 程度）。詰めるなら Native AOT だが、Windows から Linux 向けにビルドするには実質 Docker が要るため採用していない |
 | UI の仮想化 | `ListObjectsV2` は継続トークンで全件取得するが、一覧の仮想化は行っていない。ファイル数が多い用途では要検討 |
 | シードの冪等性 | `seed-user.ps1` は配置のみで既存オブジェクトを消さないため、サンプルデータの構成を変えると旧ファイルが残る |
-| prod 環境 | dev のみデプロイ・検証済み。`-c env=prod` は未実行 |
+| 現在のデプロイ状態 | dev / prod とも一度デプロイして検証したうえで削除済み。AWS 上にスタックは存在しない（初回は[セットアップ](#-セットアップ)から実施する） |
 | CI/CD | GitHub Actions は未同梱 |
 
 ---

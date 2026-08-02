@@ -19,6 +19,7 @@ public sealed class AppSetting
     // Bucket holding the per-user data.
     public string DataBucket { get; set; } = string.Empty;
 
-    // Base URL of the authenticated HTTP API (API Gateway).
+    // Base URL of the authenticated HTTP API. This points at the CloudFront distribution's /api
+    // prefix rather than the regional API Gateway endpoint, so calls stay same-origin.
     public string ApiEndpoint { get; set; } = string.Empty;
 }

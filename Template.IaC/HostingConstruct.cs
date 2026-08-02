@@ -7,7 +7,7 @@ using Amazon.CDK.AWS.S3;
 // Application hosting: private S3 bucket + CloudFront (OAC).
 public sealed class HostingConstruct : Construct
 {
-    public HostingConstruct(Construct scope, string id, EnvironmentConfig config)
+    public HostingConstruct(Construct scope, string id, EnvironmentConfig config, string apiOriginHost)
         : base(scope, id)
     {
         Bucket = new Bucket(this, "Bucket", new BucketProps
@@ -86,6 +86,19 @@ public sealed class HostingConstruct : Construct
             ],
             Comment = $"S3 WASM template ({config.EnvName})",
         });
+
+        // Serve the API from the app's own origin. Being same-origin removes the CORS preflight
+        // from every call and lets the CSP cover the API with 'self' instead of naming a host.
+        // Nothing is cached and the viewer's headers are forwarded, because the Authorization
+        // header is what the API Gateway authorizer verifies. The Host header is deliberately
+        // not forwarded, so API Gateway still sees its own domain and routes correctly.
+        Distribution.AddBehavior($"{ApiConstruct.PathPrefix}/*", new HttpOrigin(apiOriginHost), new AddBehaviorOptions
+        {
+            ViewerProtocolPolicy = ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+            AllowedMethods = AllowedMethods.ALLOW_ALL,
+            CachePolicy = CachePolicy.CACHING_DISABLED,
+            OriginRequestPolicy = OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        });
     }
 
     public Bucket Bucket { get; }
@@ -93,10 +106,16 @@ public sealed class HostingConstruct : Construct
     public Distribution Distribution { get; }
 
     // Minimal CSP that lets Blazor WASM run, with connect targets narrowed down.
-    // The S3 and API entries are regional wildcards because the bucket name and API id are only
-    // known after deploy (a direct reference would create a circular dependency with the bucket
-    // CORS and the API, which is built after hosting).
-    // Tighten them to the concrete names after deployment if desired.
+    //
+    // The API needs no entry: it is served from this distribution under /api/*, so 'self' covers
+    // it. S3 stays a regional wildcard - the bucket name is generated at deploy time and cannot
+    // be referenced from here without a cycle, since the bucket's CORS rule needs this
+    // distribution's domain. Pinning it would take a fixed bucket name, and S3 names are global,
+    // so a fixed one collides as soon as the same stack id is deployed to a second region.
+    //
+    // That wildcard is accepted rather than worked around: it still bars every host outside S3 in
+    // this region, and the directive that actually stops an injected script from running is
+    // script-src, which allows no external or inline source at all.
     private static string BuildCsp(EnvironmentConfig config)
     {
         var cognitoDomain = $"https://{config.DomainPrefix}.auth.{EnvironmentConfig.Region}.amazoncognito.com";
@@ -105,8 +124,7 @@ public sealed class HostingConstruct : Construct
             $"https://cognito-idp.{EnvironmentConfig.Region}.amazonaws.com " +
             $"https://cognito-identity.{EnvironmentConfig.Region}.amazonaws.com " +
             $"{cognitoDomain} " +
-            $"https://*.s3.{EnvironmentConfig.Region}.amazonaws.com " +
-            $"https://*.execute-api.{EnvironmentConfig.Region}.amazonaws.com";
+            $"https://*.s3.{EnvironmentConfig.Region}.amazonaws.com";
 
         return
             "default-src 'self'; " +
