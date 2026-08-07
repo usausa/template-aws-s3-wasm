@@ -232,6 +232,13 @@ dotnet build
 
 置換後、この節はもう不要なので README から削除してよい。
 
+なお、次の 2 つは**識別子ではなく画面に出る文言**なので上の置換では変わらない。プロジェクトに合わせて手で書き換える。
+
+| ファイル | 文言 |
+|---|---|
+| `{Name}.Frontend/Components/Layout/MainLayout.razor` | ヘッダーの `S3 + Cognito WASM Template` |
+| `{Name}.Frontend/Components/Pages/Home.razor` | 説明文の `Template application that ...` |
+
 ### 置換漏れで最も事故る箇所
 
 `{Name}.IaC/ApiConstruct.cs` の Lambda ハンドラー名は、**間違っていてもデプロイが成功してしまう**。
@@ -736,7 +743,7 @@ publish 出力は全関数で 1 つを共有する。そのため関数が増え
 
 ### ユーザーを発行する
 
-セルフサインアップは無効。`aws cognito-idp admin-create-user` で管理者が発行する（`scripts/seed-user.ps1` と同じ手順）。
+セルフサインアップは無効。`aws cognito-idp admin-create-user` で管理者が発行する（`scripts/seed-user.ps1` と同じ手順）。コマンド列は[🧰 手動での操作手順 - 3. ユーザー追加](#-手動での操作手順)を参照。
 
 ### その他の拡張ポイント
 
@@ -913,7 +920,7 @@ AOT の中間ディレクトリ（`obj/Release/net10.0/wasm/for-publish/aot-in/`
 | Lambda のコールドスタート | マネージドランタイムのため初回呼び出しに JIT ウォームアップが乗る（実測 700ms 程度）。詰めるなら Native AOT だが、Windows から Linux 向けにビルドするには実質 Docker が要るため採用していない |
 | UI の仮想化 | `ListObjectsV2` は継続トークンで全件取得するが、一覧の仮想化は行っていない。ファイル数が多い用途では要検討 |
 | シードの冪等性 | `seed-user.ps1` は配置のみで既存オブジェクトを消さないため、サンプルデータの構成を変えると旧ファイルが残る |
-| 現在のデプロイ状態 | dev / prod とも一度デプロイして検証したうえで削除済み。AWS 上にスタックは存在しない（初回は[セットアップ](#-セットアップ)から実施する） |
+| 現在のデプロイ状態 | dev / prod とも一度デプロイして検証したうえで削除済み。AWS 上にスタックは存在しない（初回は[セットアップ](#-セットアップ初回構築)から実施する） |
 | CI/CD | GitHub Actions は未同梱 |
 
 ---
