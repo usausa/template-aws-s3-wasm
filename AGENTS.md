@@ -5,3 +5,4 @@
 - **Warnings:** Ensure there are no build warnings
 - **Suppress warnings:** If warning suppression is needed, ask before applying the fix
 - **Language:** Use English for code comments, UI text, and script messages
+- **Line endings:** Never change existing line endings, use CRLF for newly created text files
