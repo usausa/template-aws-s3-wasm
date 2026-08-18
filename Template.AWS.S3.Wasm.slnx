@@ -10,9 +10,9 @@
     <File Path="Directory.Build.targets" />
     <File Path="LICENSE" />
     <File Path="README.md" />
-    <File Path="Template.sln.DotSettings" />
+    <File Path="Template.AWS.S3.Wasm.sln.DotSettings" />
   </Folder>
-  <Project Path="Template.Backend/Template.Backend.csproj" Id="3a5c7e91-4b28-4c6d-9e13-5f8a2b7c4d90" />
-  <Project Path="Template.Frontend/Template.Frontend.csproj" Id="7c1f4a9e-2b3d-4e5f-8a6b-1c2d3e4f5a6b" />
-  <Project Path="Template.IaC/Template.IaC.csproj" Id="d2e8b1c4-9f7a-4d3c-b5e6-a7f8c9d0e1f2" />
+  <Project Path="Template.Backend/Template.Backend.csproj" />
+  <Project Path="Template.Frontend/Template.Frontend.csproj" />
+  <Project Path="Template.IaC/Template.IaC.csproj" />
 </Solution>
