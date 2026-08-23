@@ -13,7 +13,7 @@ public sealed partial class Files
     // State
     //--------------------------------------------------------------------------------
 
-    private IReadOnlyList<UserFile>? files;
+    private List<UserFile>? files;
     private bool loading = true;
     private bool loadingDetail;
     private string? error;

@@ -34,8 +34,7 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (var file in files)
-                {
+                <Virtualize Items="files" Context="file" ItemSize="36">
                     <tr class="@(selected == file ? "row-selected" : null)">
                         <td>
                             <button type="button" class="link-button" @onclick="() => SelectAsync(file)">@file.Name</button>
@@ -46,7 +45,7 @@
                             <a class="direct-link" href="@Repository.ObjectUrl(file.Key)" target="_blank" rel="noopener noreferrer">open raw</a>
                         </td>
                     </tr>
-                }
+                </Virtualize>
             </tbody>
         </table>
 

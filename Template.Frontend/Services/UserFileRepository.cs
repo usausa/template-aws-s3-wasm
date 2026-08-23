@@ -39,7 +39,7 @@ public sealed class UserFileRepository : IDisposable
 
     // Lists the caller's files. Returns null when credentials are unavailable
     // (the caller redirects to login).
-    public async Task<IReadOnlyList<UserFile>?> ListAsync(string sub)
+    public async Task<List<UserFile>?> ListAsync(string sub)
     {
         var credentials = await credentialsProvider.GetCredentialsAsync();
         if (credentials is null)

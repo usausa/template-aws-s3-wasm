@@ -27,13 +27,17 @@ if (-not $Password) {
     $Password = 'Aa1!' + [guid]::NewGuid().ToString('N').Substring(0, 12)
 }
 
-# 1. Create the user (no invitation mail; the password is set directly).
+# 1. Create the user unless it already exists (idempotent re-run).
 #    Attribute specs are quoted so PowerShell does not split them at the comma.
-aws cognito-idp admin-create-user --user-pool-id $userPoolId --username $Email `
-    --user-attributes "Name=email,Value=$Email" "Name=email_verified,Value=true" `
-    --message-action SUPPRESS | Out-Null
+aws cognito-idp admin-get-user --user-pool-id $userPoolId --username $Email 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning 'admin-create-user failed (continuing in case the user already exists).'
+    aws cognito-idp admin-create-user --user-pool-id $userPoolId --username $Email `
+        --user-attributes "Name=email,Value=$Email" "Name=email_verified,Value=true" `
+        --message-action SUPPRESS | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'admin-create-user failed.' }
+}
+else {
+    Write-Host "User already exists, reusing it. ($Email)"
 }
 
 aws cognito-idp admin-set-user-password --user-pool-id $userPoolId --username $Email --password $Password --permanent
