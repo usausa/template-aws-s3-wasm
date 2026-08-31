@@ -19,7 +19,7 @@ public sealed partial class SeriesChart
     [EditorRequired]
     public required DataSeries Series { get; set; }
 
-    private static string ViewBox => string.Create(CultureInfo.InvariantCulture, $"0 0 {Width} {Height}");
+    private static string ViewBox => String.Create(CultureInfo.InvariantCulture, $"0 0 {Width} {Height}");
 
     //--------------------------------------------------------------------------------
     // Scale
@@ -43,13 +43,13 @@ public sealed partial class SeriesChart
 
     private string LinePoints() =>
         String.Join(' ', Series.Points.Select((point, index) =>
-            string.Create(CultureInfo.InvariantCulture, $"{X(index):F1},{Y(point.Value):F1}")));
+            String.Create(CultureInfo.InvariantCulture, $"{X(index):F1},{Y(point.Value):F1}")));
 
     // Closing the line down to the baseline gives the filled band under the curve.
     private string AreaPoints() =>
-        string.Create(CultureInfo.InvariantCulture, $"{PadLeft:F1},{Height - PadBottom:F1} ") +
+        String.Create(CultureInfo.InvariantCulture, $"{PadLeft:F1},{Height - PadBottom:F1} ") +
         LinePoints() +
-        string.Create(CultureInfo.InvariantCulture, $" {X(Series.Points.Count - 1):F1},{Height - PadBottom:F1}");
+        String.Create(CultureInfo.InvariantCulture, $" {X(Series.Points.Count - 1):F1},{Height - PadBottom:F1}");
 
     private IEnumerable<GridLine> GridLines()
     {

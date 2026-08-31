@@ -5,6 +5,7 @@ using System.Text.Json.Serialization.Metadata;
 // Builds the API Gateway responses. Kept in one place so every function returns the same shape and
 // headers. No CORS headers: the browser reaches this API through CloudFront on the app's own
 // origin, so the calls are same-origin.
+#pragma warning disable CA1724
 public static class Json
 {
     public static APIGatewayHttpApiV2ProxyResponse Ok<T>(T payload, JsonTypeInfo<T> typeInfo) =>
@@ -24,3 +25,4 @@ public static class Json
             Body = body,
         };
 }
+#pragma warning restore CA1724

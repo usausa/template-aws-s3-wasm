@@ -36,7 +36,7 @@ public sealed class EnvironmentConfig
             throw new InvalidOperationException($"cdk.json has no context for environment '{envName}'.");
         }
 
-        if (!context.TryGetValue("domainPrefix", out var prefix) || prefix is not string domainPrefix)
+        if (!context.TryGetValue("domainPrefix", out var prefix) || (prefix is not string domainPrefix))
         {
             throw new InvalidOperationException($"domainPrefix is missing for environment '{envName}'.");
         }
@@ -44,6 +44,6 @@ public sealed class EnvironmentConfig
         return new EnvironmentConfig(
             envName,
             domainPrefix,
-            context.TryGetValue("allowLocalhost", out var allow) && allow is true);
+            context.TryGetValue("allowLocalhost", out var allow) && (allow is true));
     }
 }

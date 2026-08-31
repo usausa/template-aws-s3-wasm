@@ -2,6 +2,7 @@ namespace Template.Backend.Application;
 
 // Reads the claims the API Gateway authorizer already verified. Stateless, so it stays a static
 // helper rather than being pushed through the container.
+#pragma warning disable CA1724
 public static class Claims
 {
     public static string Sub(APIGatewayHttpApiV2ProxyRequest request) => Read(request, "sub");
@@ -14,3 +15,4 @@ public static class Claims
         return (claims is not null) && claims.TryGetValue(name, out var value) ? value : string.Empty;
     }
 }
+#pragma warning restore CA1724

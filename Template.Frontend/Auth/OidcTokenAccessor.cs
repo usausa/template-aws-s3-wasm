@@ -10,6 +10,7 @@ using System.Text.Json.Serialization;
 // Microsoft.AspNetCore.Components.WebAssembly.Authentication exposes access tokens only
 // (IAccessTokenProvider). The oidc-client-ts storage key is the stable
 // 'oidc.user:{authority}:{clientId}', so it is read directly.
+#pragma warning disable SA1203
 public sealed class OidcTokenAccessor
 {
     private readonly IJSRuntime js;
@@ -57,6 +58,7 @@ public sealed class OidcTokenAccessor
     public async Task ClearCachedIdentityIdAsync() =>
         await js.InvokeVoidAsync("sessionStorage.removeItem", IdentityIdKey);
 }
+#pragma warning restore SA1203
 
 // oidc-client-ts User object persisted in sessionStorage (only the fields we need).
 internal sealed record OidcSession(
