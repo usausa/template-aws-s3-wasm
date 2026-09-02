@@ -31,7 +31,7 @@ public sealed class DataConstruct : Construct
             [
                 new CorsRule
                 {
-                    AllowedOrigins = [.. origins],
+                    AllowedOrigins = origins.ToArray(),
                     AllowedMethods = [HttpMethods.GET, HttpMethods.HEAD],
                     AllowedHeaders = ["*"],
                     ExposedHeaders = ["ETag"],

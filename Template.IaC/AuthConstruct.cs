@@ -53,8 +53,8 @@ public sealed class AuthConstruct : Construct
             {
                 Flows = new OAuthFlows { AuthorizationCodeGrant = true },
                 Scopes = [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
-                CallbackUrls = [.. callbackUrls],
-                LogoutUrls = [.. logoutUrls],
+                CallbackUrls = callbackUrls.ToArray(),
+                LogoutUrls = logoutUrls.ToArray(),
             },
             PreventUserExistenceErrors = true,
             AccessTokenValidity = Duration.Minutes(60),
