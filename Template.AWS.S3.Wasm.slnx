@@ -13,6 +13,6 @@
     <File Path="Template.AWS.S3.Wasm.sln.DotSettings" />
   </Folder>
   <Project Path="Template.Backend/Template.Backend.csproj" />
-  <Project Path="Template.Frontend/Template.Frontend.csproj" />
+  <Project Path="Template.Frontend/Template.Frontend.csproj" DefaultStartup="true" />
   <Project Path="Template.IaC/Template.IaC.csproj" />
 </Solution>
