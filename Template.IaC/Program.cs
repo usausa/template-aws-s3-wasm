@@ -14,9 +14,9 @@ public static class Program
             Env = new Amazon.CDK.Environment
             {
                 Account = System.Environment.GetEnvironmentVariable("CDK_DEFAULT_ACCOUNT"),
-                Region = EnvironmentConfig.Region,
+                Region = EnvironmentConfig.Region
             },
-            Description = "S3 hosted WASM application template (CloudFront hosting + Cognito auth + per-user data bucket)",
+            Description = "S3 hosted WASM application template (CloudFront hosting + Cognito auth + per-user data bucket)"
         });
 
         app.Synth();

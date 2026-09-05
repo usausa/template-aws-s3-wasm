@@ -28,12 +28,12 @@ public sealed class AuthConstruct : Construct
             SignInAliases = new SignInAliases { Email = true },
             StandardAttributes = new StandardAttributes
             {
-                Email = new StandardAttribute { Required = true, Mutable = true },
+                Email = new StandardAttribute { Required = true, Mutable = true }
             },
             AccountRecovery = AccountRecovery.EMAIL_ONLY,
             FeaturePlan = FeaturePlan.ESSENTIALS,
             RemovalPolicy = config.Ephemeral ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
-            DeletionProtection = !config.Ephemeral,
+            DeletionProtection = !config.Ephemeral
         });
 
         var callbackUrls = new List<string> { $"{appOrigin}/authentication/login-callback" };
@@ -53,19 +53,19 @@ public sealed class AuthConstruct : Construct
             {
                 Flows = new OAuthFlows { AuthorizationCodeGrant = true },
                 Scopes = [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
-                CallbackUrls = callbackUrls.ToArray(),
-                LogoutUrls = logoutUrls.ToArray(),
+                CallbackUrls = [.. callbackUrls],
+                LogoutUrls = [.. logoutUrls]
             },
             PreventUserExistenceErrors = true,
             AccessTokenValidity = Duration.Minutes(60),
             IdTokenValidity = Duration.Minutes(60),
-            RefreshTokenValidity = Duration.Days(30),
+            RefreshTokenValidity = Duration.Days(30)
         });
 
         Domain = UserPool.AddDomain("Domain", new UserPoolDomainOptions
         {
             CognitoDomain = new CognitoDomainOptions { DomainPrefix = config.DomainPrefix },
-            ManagedLoginVersion = ManagedLoginVersion.NEWER_MANAGED_LOGIN,
+            ManagedLoginVersion = ManagedLoginVersion.NEWER_MANAGED_LOGIN
         });
 
         // Managed login (v2) requires a branding definition per client; assign the default style.
@@ -73,7 +73,7 @@ public sealed class AuthConstruct : Construct
         {
             UserPoolId = UserPool.UserPoolId,
             ClientId = Client.UserPoolClientId,
-            UseCognitoProvidedValues = true,
+            UseCognitoProvidedValues = true
         });
 
         //--------------------------------------------------------------------------------
@@ -91,9 +91,9 @@ public sealed class AuthConstruct : Construct
                 {
                     ProviderName = providerName,
                     ClientId = Client.UserPoolClientId,
-                    ServerSideTokenCheck = true,
-                },
-            },
+                    ServerSideTokenCheck = true
+                }
+            }
         });
 
         // Propagate the ID token 'sub' (user pool user id) as the session tag 'userId'.
@@ -106,7 +106,7 @@ public sealed class AuthConstruct : Construct
             IdentityPoolId = identityPool.Ref,
             IdentityProviderName = providerName,
             UseDefaults = false,
-            PrincipalTags = new Dictionary<string, string> { ["userId"] = "sub" },
+            PrincipalTags = new Dictionary<string, string> { ["userId"] = "sub" }
         });
 
         // Role assumed by authenticated users. sts:TagSession is required for session tags.
@@ -118,15 +118,15 @@ public sealed class AuthConstruct : Construct
                 {
                     ["StringEquals"] = new Dictionary<string, object>
                     {
-                        ["cognito-identity.amazonaws.com:aud"] = identityPool.Ref,
+                        ["cognito-identity.amazonaws.com:aud"] = identityPool.Ref
                     },
                     ["ForAnyValue:StringLike"] = new Dictionary<string, object>
                     {
-                        ["cognito-identity.amazonaws.com:amr"] = "authenticated",
-                    },
+                        ["cognito-identity.amazonaws.com:amr"] = "authenticated"
+                    }
                 },
                 "sts:AssumeRoleWithWebIdentity").WithSessionTags(),
-            Description = "Authenticated role for the user file portal",
+            Description = "Authenticated role for the user file portal"
         });
 
         authenticatedRole.AddToPolicy(new PolicyStatement(new PolicyStatementProps
@@ -138,22 +138,22 @@ public sealed class AuthConstruct : Construct
             {
                 ["StringLike"] = new Dictionary<string, object>
                 {
-                    ["s3:prefix"] = "users/${aws:PrincipalTag/userId}/*",
-                },
-            },
+                    ["s3:prefix"] = "users/${aws:PrincipalTag/userId}/*"
+                }
+            }
         }));
 
         authenticatedRole.AddToPolicy(new PolicyStatement(new PolicyStatementProps
         {
             Sid = "GetOwnObjects",
             Actions = ["s3:GetObject"],
-            Resources = [dataBucket.BucketArn + "/users/${aws:PrincipalTag/userId}/*"],
+            Resources = [dataBucket.BucketArn + "/users/${aws:PrincipalTag/userId}/*"]
         }));
 
         _ = new CfnIdentityPoolRoleAttachment(this, "RoleAttachment", new CfnIdentityPoolRoleAttachmentProps
         {
             IdentityPoolId = identityPool.Ref,
-            Roles = new Dictionary<string, object> { ["authenticated"] = authenticatedRole.RoleArn },
+            Roles = new Dictionary<string, object> { ["authenticated"] = authenticatedRole.RoleArn }
         });
 
         IdentityPoolId = identityPool.Ref;

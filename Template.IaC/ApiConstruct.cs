@@ -38,7 +38,7 @@ public sealed class ApiConstruct : Construct
     // Published output of the Template.Backend project, produced by scripts/deploy-api.ps1. Every
     // function shares this one artifact and differs only by handler.
     private static readonly string Artifact =
-        System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "..", "publish-api");
+        Path.Combine(Directory.GetCurrentDirectory(), "..", "publish-api");
 
     private readonly EnvironmentConfig config;
 
@@ -51,7 +51,7 @@ public sealed class ApiConstruct : Construct
         // origin, so requests are same-origin and never trigger a preflight.
         Api = new HttpApi(this, "Api", new HttpApiProps
         {
-            Description = $"User file portal API ({config.EnvName})",
+            Description = $"User file portal API ({config.EnvName})"
         });
     }
 
@@ -70,7 +70,7 @@ public sealed class ApiConstruct : Construct
 
             // The app calls the API with an access token, whose audience lives in the
             // 'client_id' claim rather than 'aud'.
-            IdentitySource = ["$request.header.Authorization"],
+            IdentitySource = ["$request.header.Authorization"]
         });
 
         AddRoute(authorizer, "Hello", HttpMethod.GET, "/hello", "HelloFunction");
@@ -90,9 +90,9 @@ public sealed class ApiConstruct : Construct
             LogGroup = new LogGroup(this, $"{name}Logs", new LogGroupProps
             {
                 Retention = config.Ephemeral ? RetentionDays.ONE_WEEK : RetentionDays.ONE_MONTH,
-                RemovalPolicy = config.Ephemeral ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
+                RemovalPolicy = config.Ephemeral ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN
             }),
-            Description = $"{name} API ({config.EnvName})",
+            Description = $"{name} API ({config.EnvName})"
         });
 
         Api.AddRoutes(new AddRoutesOptions
@@ -100,7 +100,7 @@ public sealed class ApiConstruct : Construct
             Path = $"{PathPrefix}{path}",
             Methods = [method],
             Authorizer = authorizer,
-            Integration = new HttpLambdaIntegration($"{name}Integration", function),
+            Integration = new HttpLambdaIntegration($"{name}Integration", function)
         });
     }
 }
