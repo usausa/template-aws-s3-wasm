@@ -12,7 +12,7 @@
     <File Path="README.md" />
     <File Path="Template.AWS.S3.Wasm.sln.DotSettings" />
   </Folder>
-  <Project Path="Template.Backend/Template.Backend.csproj" />
-  <Project Path="Template.Frontend/Template.Frontend.csproj" DefaultStartup="true" />
-  <Project Path="Template.IaC/Template.IaC.csproj" />
+  <Project Path="src/Template.Backend/Template.Backend.csproj" />
+  <Project Path="src/Template.Frontend/Template.Frontend.csproj" DefaultStartup="true" />
+  <Project Path="src/Template.IaC/Template.IaC.csproj" />
 </Solution>
