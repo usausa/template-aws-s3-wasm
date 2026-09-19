@@ -4,7 +4,7 @@ using Amazon.Runtime;
 
 using Template.Frontend.Application;
 
-public sealed partial class Files
+public sealed partial class Files : IDisposable
 {
     // Files above this size are not fetched into the browser at all.
     private const long ContentLimit = 1024 * 1024;
@@ -13,8 +13,16 @@ public sealed partial class Files
     // State
     //--------------------------------------------------------------------------------
 
+    // Cancels requests still in flight when the page is left.
+    private readonly CancellationTokenSource lifetimeCts = new();
+
+    // A newer selection cancels the previous read so a slow response cannot overwrite the current file.
+    private CancellationTokenSource? selectCts;
+
     private List<UserFile>? files;
+    private string? nextToken;
     private bool loading = true;
+    private bool loadingMore;
     private bool loadingDetail;
     private string? error;
     private UserFile? selected;
@@ -50,6 +58,14 @@ public sealed partial class Files
         await ReloadAsync();
     }
 
+    public void Dispose()
+    {
+        selectCts?.Cancel();
+        selectCts?.Dispose();
+        lifetimeCts.Cancel();
+        lifetimeCts.Dispose();
+    }
+
     //--------------------------------------------------------------------------------
     // Action
     //--------------------------------------------------------------------------------
@@ -62,15 +78,16 @@ public sealed partial class Files
 
         try
         {
-            var result = await Repository.ListAsync(sub);
-            if (result is null)
+            var page = await Repository.ListAsync(sub, null, lifetimeCts.Token);
+            if (page is null)
             {
                 // Session expired. Redirect to interactive login.
                 Navigation.NavigateToLogin("authentication/login");
                 return;
             }
 
-            files = result;
+            files = [.. page.Files];
+            nextToken = page.ContinuationToken;
 
             // Open the first renderable file so the page is not empty on arrival.
             var first = files.FirstOrDefault(static x => MediaHelper.IsPreviewableText(x.Name));
@@ -78,6 +95,10 @@ public sealed partial class Files
             {
                 await SelectAsync(first);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // The page was left while loading.
         }
         catch (AmazonClientException ex)
         {
@@ -96,8 +117,57 @@ public sealed partial class Files
         }
     }
 
+    private async Task LoadMoreAsync()
+    {
+        if ((files is null) || (nextToken is null) || loadingMore)
+        {
+            return;
+        }
+
+        loadingMore = true;
+        try
+        {
+            var page = await Repository.ListAsync(sub, nextToken, lifetimeCts.Token);
+            if (page is null)
+            {
+                Navigation.NavigateToLogin("authentication/login");
+                return;
+            }
+
+            files.AddRange(page.Files);
+            nextToken = page.ContinuationToken;
+        }
+        catch (OperationCanceledException)
+        {
+            // The page was left while loading.
+        }
+        catch (AmazonClientException ex)
+        {
+            Log.ErrorFileOperation(nameof(LoadMoreAsync), ex);
+            error = $"Failed to list files. ({ex.Message})";
+        }
+        catch (HttpRequestException ex)
+        {
+            Log.ErrorFileOperation(nameof(LoadMoreAsync), ex);
+            error = $"Failed to list files. ({ex.Message})";
+        }
+        finally
+        {
+            loadingMore = false;
+        }
+    }
+
     private async Task SelectAsync(UserFile file)
     {
+        if (selectCts is not null)
+        {
+            await selectCts.CancelAsync();
+            selectCts.Dispose();
+        }
+
+        selectCts = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCts.Token);
+        var token = selectCts.Token;
+
         selected = file;
         series = null;
         text = null;
@@ -110,7 +180,12 @@ public sealed partial class Files
         loadingDetail = true;
         try
         {
-            var content = await Repository.GetTextAsync(file.Key);
+            var content = await Repository.GetTextAsync(file.Key, token);
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
             if (content is null)
             {
                 Navigation.NavigateToLogin("authentication/login");
@@ -121,19 +196,27 @@ public sealed partial class Files
             series = SeriesParser.Parse(file.Name, content);
             text = series is null ? content : null;
         }
-        catch (AmazonClientException ex)
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer selection, or the page was left.
+        }
+        catch (AmazonClientException ex) when (!token.IsCancellationRequested)
         {
             Log.ErrorFileOperation(nameof(SelectAsync), ex);
             error = $"Failed to load the file. ({ex.Message})";
         }
-        catch (HttpRequestException ex)
+        catch (HttpRequestException ex) when (!token.IsCancellationRequested)
         {
             Log.ErrorFileOperation(nameof(SelectAsync), ex);
             error = $"Failed to load the file. ({ex.Message})";
         }
         finally
         {
-            loadingDetail = false;
+            // A superseded request must not clear the indicator of the newer one.
+            if (!token.IsCancellationRequested)
+            {
+                loadingDetail = false;
+            }
         }
     }
 

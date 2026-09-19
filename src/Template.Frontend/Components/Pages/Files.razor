@@ -49,6 +49,13 @@
             </tbody>
         </table>
 
+        @if (nextToken is not null)
+        {
+            <p class="panel-sub">
+                <button type="button" class="button" @onclick="LoadMoreAsync" disabled="@loadingMore">@(loadingMore ? "Loading..." : "Load more")</button>
+            </p>
+        }
+
         <p class="panel-note">
             "open raw" points straight at the S3 object. It returns
             <code>AccessDenied</code> in a browser even while you are signed in here: the bucket

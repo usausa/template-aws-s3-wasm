@@ -14,6 +14,9 @@ using Template.Frontend.Auth;
 // tampering with keys on the client cannot reach other users' data (AccessDenied).
 public sealed class UserFileRepository : IDisposable
 {
+    // Keys per list request. The page renders the first page immediately and asks for the rest on demand.
+    private const int ListPageSize = 100;
+
     private readonly AwsCredentialsProvider credentialsProvider;
     private readonly AppSetting setting;
     private readonly ILogger<UserFileRepository> log;
@@ -37,9 +40,10 @@ public sealed class UserFileRepository : IDisposable
 
     public static string Prefix(string sub) => $"users/{sub}/";
 
-    // Lists the caller's files. Returns null when credentials are unavailable
-    // (the caller redirects to login).
-    public async Task<List<UserFile>?> ListAsync(string sub)
+    // Lists one page of the caller's files (S3 returns keys in byte order, so no sorting is needed).
+    // Pass the previous page's ContinuationToken to continue. Returns null when credentials are
+    // unavailable (the caller redirects to login).
+    public async Task<UserFilePage?> ListAsync(string sub, string? continuationToken, CancellationToken cancellationToken)
     {
         var credentials = await credentialsProvider.GetCredentialsAsync();
         if (credentials is null)
@@ -51,44 +55,37 @@ public sealed class UserFileRepository : IDisposable
         var prefix = Prefix(sub);
         var s3 = ResolveClient(credentials);
 
-        var files = new List<UserFile>();
         var request = new ListObjectsV2Request
         {
             BucketName = setting.DataBucket,
             Prefix = prefix,
+            MaxKeys = ListPageSize,
+            ContinuationToken = continuationToken,
         };
+        var response = await s3.ListObjectsV2Async(request, cancellationToken);
 
-        ListObjectsV2Response response;
-        do
+        var files = new List<UserFile>();
+        foreach (var s3Object in response.S3Objects ?? [])
         {
-            response = await s3.ListObjectsV2Async(request);
-            foreach (var s3Object in response.S3Objects ?? [])
+            // Skip the zero-byte object representing the prefix itself (folder placeholder).
+            if (String.Equals(s3Object.Key, prefix, StringComparison.Ordinal))
             {
-                // Skip the zero-byte object representing the prefix itself (folder placeholder).
-                if (String.Equals(s3Object.Key, prefix, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                files.Add(new UserFile(
-                    s3Object.Key,
-                    s3Object.Key[prefix.Length..],
-                    s3Object.Size ?? 0,
-                    s3Object.LastModified));
+                continue;
             }
 
-            request.ContinuationToken = response.NextContinuationToken;
+            files.Add(new UserFile(
+                s3Object.Key,
+                s3Object.Key[prefix.Length..],
+                s3Object.Size ?? 0,
+                s3Object.LastModified));
         }
-        while (response.IsTruncated == true);
-
-        files.Sort(static (x, y) => String.CompareOrdinal(x.Key, y.Key));
 
         log.InfoFilesListed(files.Count, prefix, watch.ElapsedMilliseconds);
-        return files;
+        return new UserFilePage(files, response.IsTruncated == true ? response.NextContinuationToken : null);
     }
 
     // Reads a text file. Returns null when credentials are unavailable.
-    public async Task<string?> GetTextAsync(string key)
+    public async Task<string?> GetTextAsync(string key, CancellationToken cancellationToken)
     {
         var credentials = await credentialsProvider.GetCredentialsAsync();
         if (credentials is null)
@@ -97,9 +94,9 @@ public sealed class UserFileRepository : IDisposable
         }
 
         var s3 = ResolveClient(credentials);
-        using var response = await s3.GetObjectAsync(setting.DataBucket, key);
+        using var response = await s3.GetObjectAsync(setting.DataBucket, key, cancellationToken);
         using var reader = new StreamReader(response.ResponseStream);
-        return await reader.ReadToEndAsync();
+        return await reader.ReadToEndAsync(cancellationToken);
     }
 
     // Plain S3 object URL, shown in the UI so the access model can be checked by hand.
