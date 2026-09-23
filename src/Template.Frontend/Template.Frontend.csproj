@@ -21,16 +21,18 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="AWSSDK.CognitoIdentity" Version="4.0.100.7" />
-    <PackageReference Include="AWSSDK.S3" Version="4.0.101.6" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.10" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Authentication" Version="10.0.10" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.10" PrivateAssets="all" />
+    <PackageReference Include="AWSSDK.CognitoIdentity" Version="4.0.100.14" />
+    <PackageReference Include="AWSSDK.S3" Version="4.0.103.3" />
+    <!-- NU1603: CognitoIdentity が要求する版が無いため直接ピンする -->
+    <PackageReference Include="AWSSDK.SecurityToken" Version="4.0.101" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.12" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Authentication" Version="10.0.12" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.12" PrivateAssets="all" />
 
     <!-- Needed for AddHttpClient, which is how an AuthorizationMessageHandler gets an inner
          handler supplied. Attaching the token by hand would mean building the handler chain
          manually for no benefit. -->
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />
   </ItemGroup>
 
 </Project>
