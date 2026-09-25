@@ -402,7 +402,7 @@ aws logs describe-log-groups --query "logGroups[?contains(logGroupName,'template
 ```
 template-aws-s3-wasm/
 ├── .editorconfig / Analyzers.ruleset / Directory.Build.props / Directory.Build.targets
-├── AGENTS.md / CLAUDE.md                    ← コーディング規約（CLAUDE.md は @AGENTS.md 参照）
+├── AGENTS.md                                ← コーディング規約
 ├── Template.slnx                            ← ソリューション (3 プロジェクト)
 │
 ├── Template.Backend/                                 ← Lambda (net10.0, マネージド dotnet10 ランタイム)
