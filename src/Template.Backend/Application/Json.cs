@@ -20,9 +20,9 @@ public static class Json
             StatusCode = statusCode,
             Headers = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["Content-Type"] = "application/json",
+                ["Content-Type"] = "application/json"
             },
-            Body = body,
+            Body = body
         };
 }
 #pragma warning restore CA1724

@@ -35,9 +35,9 @@ public sealed class DataConstruct : Construct
                     AllowedMethods = [HttpMethods.GET, HttpMethods.HEAD],
                     AllowedHeaders = ["*"],
                     ExposedHeaders = ["ETag"],
-                    MaxAge = 3000,
-                },
-            ],
+                    MaxAge = 3000
+                }
+            ]
         });
     }
 

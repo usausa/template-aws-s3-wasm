@@ -60,7 +60,7 @@ public sealed class UserFileRepository : IDisposable
             BucketName = setting.DataBucket,
             Prefix = prefix,
             MaxKeys = ListPageSize,
-            ContinuationToken = continuationToken,
+            ContinuationToken = continuationToken
         };
         var response = await s3.ListObjectsV2Async(request, cancellationToken);
 

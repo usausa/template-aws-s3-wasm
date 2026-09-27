@@ -74,7 +74,7 @@ public sealed class AwsCredentialsProvider : IDisposable
 
             var logins = new Dictionary<string, string>
             {
-                [$"cognito-idp.{setting.Region}.amazonaws.com/{setting.UserPoolId}"] = idToken,
+                [$"cognito-idp.{setting.Region}.amazonaws.com/{setting.UserPoolId}"] = idToken
             };
 
             // The identity id never changes for a user, so it is resolved once and then reused
@@ -108,9 +108,7 @@ public sealed class AwsCredentialsProvider : IDisposable
             // Credentials last about an hour. Fall back to a safe default when the
             // server value is missing.
             var serverExpiration = response.Credentials.Expiration;
-            expiration = serverExpiration.HasValue
-                ? serverExpiration.Value.ToUniversalTime()
-                : DateTime.UtcNow.AddMinutes(50);
+            expiration = serverExpiration?.ToUniversalTime() ?? DateTime.UtcNow.AddMinutes(50);
 
             log.InfoCredentialsAcquired(response.IdentityId, expiration);
             return credentials;
@@ -130,7 +128,7 @@ public sealed class AwsCredentialsProvider : IDisposable
             identityId = (await client.GetIdAsync(new GetIdRequest
             {
                 IdentityPoolId = setting.IdentityPoolId,
-                Logins = logins,
+                Logins = logins
             })).IdentityId;
 
             await tokenAccessor.SetCachedIdentityIdAsync(identityId);
@@ -139,7 +137,7 @@ public sealed class AwsCredentialsProvider : IDisposable
         return await client.GetCredentialsForIdentityAsync(new GetCredentialsForIdentityRequest
         {
             IdentityId = identityId,
-            Logins = logins,
+            Logins = logins
         });
     }
 

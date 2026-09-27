@@ -30,20 +30,20 @@ public sealed partial class Api
     // Action
     //--------------------------------------------------------------------------------
 
-    private async Task CallHelloAsync()
+    private Task CallHelloAsync()
     {
         var watch = Stopwatch.StartNew();
-        await CallAsync(async () =>
+        return CallAsync(async () =>
         {
             hello = await Client.GetHelloAsync();
             helloMs = watch.ElapsedMilliseconds;
         });
     }
 
-    private async Task CallEchoAsync()
+    private Task CallEchoAsync()
     {
         var watch = Stopwatch.StartNew();
-        await CallAsync(async () =>
+        return CallAsync(async () =>
         {
             echo = await Client.PostEchoAsync(message);
             echoMs = watch.ElapsedMilliseconds;

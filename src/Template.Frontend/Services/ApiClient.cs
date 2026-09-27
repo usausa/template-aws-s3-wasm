@@ -20,8 +20,8 @@ public sealed class ApiClient
     // Name of the configured client; shared with Program.cs so the registration stays in one place.
     public const string Name = "Api";
 
-    public async Task<HelloResponse?> GetHelloAsync() =>
-        await client.GetFromJsonAsync("hello", ApiSerializerContext.Default.HelloResponse);
+    public Task<HelloResponse?> GetHelloAsync() =>
+        client.GetFromJsonAsync("hello", ApiSerializerContext.Default.HelloResponse);
 
     public async Task<EchoResponse?> PostEchoAsync(string message)
     {
