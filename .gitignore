@@ -433,7 +433,7 @@ cdk.out/
 cdk-outputs.*.json
 
 # SAM
-Template.Backend/serverless.template
+src/Template.Backend/serverless.template
 
 Template.Frontend/wwwroot/appsettings.Production.json
 publish-api/
