@@ -1,128 +1,130 @@
 # template-aws-s3-wasm
 
-AWS S3 静的ホスティングで動作する Blazor WebAssembly アプリケーションのテンプレート。
-Cognito で認証し、**S3 上の「そのユーザー自身のデータファイル」だけ**を参照できる。認証付きの Lambda API も同梱している。
+English | [日本語](README.ja.md)
 
-本書 1 つでゼロから構築・運用・拡張できるようにしてある。
+Template of a Blazor WebAssembly application that runs on AWS S3 static hosting.
+It authenticates with Cognito, and users can read **only "their own data files" on S3**. An authenticated Lambda API is also included.
+
+This document alone is enough to build, operate, and extend it from scratch.
 
 ---
 
-## 📖 概要
+## 📖 Overview
 
-### できること
+### What it does
 
-- Cognito Managed Login でサインインし、S3 上の `users/{sub}/` 配下のファイルだけを一覧・表示できる
-- CSV は集計値・グラフ・明細テーブルとして描画される
-- API Gateway + Lambda の認証付き API を呼び出せる（未認証は 401 で遮断）
-- インフラ一式が CDK (C#) で再現でき、数コマンドでデプロイ・削除できる
+- Sign in with Cognito Managed Login and list and view only the files under `users/{sub}/` on S3
+- CSV files are rendered as summary values, a chart, and a detail table
+- Call the authenticated API of API Gateway + Lambda (unauthenticated calls are blocked with 401)
+- The whole infrastructure is reproducible with CDK (C#) and can be deployed and removed with a few commands
 
-### 前提と割り切り
+### Assumptions and trade-offs
 
-| 項目 | 方針 |
+| Item | Policy |
 |---|---|
-| データの書き込み | **参照のみ**。S3 へのデータ配置は別システムが行う前提（検証用のシードスクリプトのみ同梱） |
-| ユーザー登録 | セルフサインアップ無効。**管理者発行のみ** |
-| UI | テンプレートとしての最小限。業務機能は含まない |
-| リージョン | `ap-northeast-1` 固定（変更は `Template.IaC/EnvironmentConfig.cs` と `scripts/common.ps1`） |
+| Writing data | **Read only**. Another system is assumed to place the data on S3 (only a seed script for verification is included) |
+| User registration | Self sign-up disabled. **Issued by administrators only** |
+| UI | The minimum for a template. No business features |
+| Region | Fixed to `ap-northeast-1` (to change it, edit `Template.IaC/EnvironmentConfig.cs` and `scripts/common.ps1`) |
 
-### この構成が向かない条件
+### When this architecture does not fit
 
-ユーザーごとの小〜中規模ファイルを本人だけが読む、という前提で成立している。次に当たる場合は API 層へ処理を寄せる設計に変える。
+It works on the assumption that each user reads only their own small to medium-sized files. In the following cases, change the design to move the processing to the API layer.
 
-- 1 ユーザーあたりのデータ量がブラウザに載せられない規模になる
-- 複数ユーザーを横断した集計・検索が必要になる
-- データの結合・加工をサーバー側で行う必要がある
+- The amount of data per user grows too large to load in the browser
+- Aggregation or search across multiple users is needed
+- Data needs to be joined or processed on the server side
 
 ---
 
-## 🏗️ アーキテクチャ
+## 🏗️ Architecture
 
 ```mermaid
 graph LR
-    subgraph Browser["ブラウザ (Blazor WASM)"]
+    subgraph Browser["Browser (Blazor WASM)"]
         App[Frontend]
     end
 
     subgraph AWS
-        CF[CloudFront<br/>OAC + セキュリティヘッダー<br/>SPA フォールバック]
-        AppBucket[(S3: アプリバケット<br/>非公開)]
-        UP[Cognito User Pool<br/>Managed Login<br/>認証: OIDC code+PKCE]
-        IP[Cognito Identity Pool<br/>認可: 一時 AWS 認証情報<br/>+ Principal Tag]
-        DataBucket[(S3: データバケット<br/>users/&#123;sub&#125;/...<br/>非公開 + CORS)]
-        APIGW[API Gateway HTTP API<br/>Cognito JWT オーソライザー]
-        Fn[Lambda<br/>検証済みクレームを参照]
+        CF[CloudFront<br/>OAC + security headers<br/>SPA fallback]
+        AppBucket[(S3: app bucket<br/>private)]
+        UP[Cognito User Pool<br/>Managed Login<br/>Authentication: OIDC code+PKCE]
+        IP[Cognito Identity Pool<br/>Authorization: temporary AWS credentials<br/>+ Principal Tag]
+        DataBucket[(S3: data bucket<br/>users/&#123;sub&#125;/...<br/>private + CORS)]
+        APIGW[API Gateway HTTP API<br/>Cognito JWT authorizer]
+        Fn[Lambda<br/>Reads validated claims]
     end
 
-    App -- "① アプリ配信 (匿名)" --> CF
+    App -- "① App delivery (anonymous)" --> CF
     CF --> AppBucket
-    App -- "② ログイン (リダイレクト)" --> UP
-    App -- "③ ID トークン → 一時認証情報" --> IP
-    App -- "④ SigV4 署名付き GET/List<br/>(本人プレフィックスのみ IAM 許可)" --> DataBucket
-    App -- "⑤ /api/* + アクセストークン (Bearer)" --> CF
-    CF -- "同一オリジンのまま転送" --> APIGW
-    APIGW -- "検証済みクレーム付きイベント" --> Fn
+    App -- "② Login (redirect)" --> UP
+    App -- "③ ID token → temporary credentials" --> IP
+    App -- "④ SigV4-signed GET/List<br/>(IAM allows only the own prefix)" --> DataBucket
+    App -- "⑤ /api/* + access token (Bearer)" --> CF
+    CF -- "Forwarded as the same origin" --> APIGW
+    APIGW -- "Event with validated claims" --> Fn
 ```
 
-④ と ⑤ は**認可の方式が異なる 2 本のレーン**。どちらも同じ Cognito サインインから出発するが、権限を評価する主体が違う（S3 は IAM ポリシー、API は API Gateway による JWT 検証）。
+④ and ⑤ are **two lanes with different authorization methods**. Both start from the same Cognito sign-in, but what evaluates the permissions differs (IAM policies for S3, and JWT validation by API Gateway for the API).
 
-### AWS リソース
+### AWS resources
 
-| リソース | 用途 | 要点 |
+| Resource | Purpose | Key points |
 |---|---|---|
-| S3 アプリバケット | Blazor publish 出力の配信元 | パブリックアクセス全ブロック。CloudFront OAC からのみ読み取り可 |
-| CloudFront | アプリ配信 | OAC / HTTPS 強制 / 403・404 → `/index.html` (200) の SPA フォールバック / セキュリティヘッダー付与 / PriceClass 200 |
-| S3 データバケット | ユーザー毎データ | パブリックアクセス全ブロック。CORS はアプリオリジンのみ。アクセスは SigV4 署名付きの直接リクエスト |
-| Cognito User Pool | 認証 | Managed Login、code + PKCE、シークレットなし、セルフサインアップ無効 |
-| Cognito Identity Pool | 認可（AWS 認証情報の払い出し） | 認証済みのみ。Principal Tag で `sub` をセッションタグへマッピング |
-| IAM ロール（認証済み） | S3 データアクセス | `users/${aws:PrincipalTag/userId}/*` に限定 |
-| API Gateway (HTTP API) | 認証付き API の入口 | JWT オーソライザーを全ルートに適用。CloudFront の `/api/*` ビヘイビア経由で同一オリジンとして呼ばれる |
-| Lambda × 2 | API の処理本体（ダミー） | マネージド `dotnet10` ランタイム |
+| S3 app bucket | Origin of the Blazor publish output | Block all public access. Readable only through CloudFront OAC |
+| CloudFront | App delivery | OAC / HTTPS enforced / SPA fallback of 403 and 404 → `/index.html` (200) / security headers added / PriceClass 200 |
+| S3 data bucket | Per-user data | Block all public access. CORS allows only the app origin. Accessed with SigV4-signed direct requests |
+| Cognito User Pool | Authentication | Managed Login, code + PKCE, no secret, self sign-up disabled |
+| Cognito Identity Pool | Authorization (issuing AWS credentials) | Authenticated identities only. Maps `sub` to a session tag with Principal Tag |
+| IAM role (authenticated) | S3 data access | Limited to `users/${aws:PrincipalTag/userId}/*` |
+| API Gateway (HTTP API) | Entry point of the authenticated API | JWT authorizer applied to all routes. Called as the same origin through the `/api/*` behavior of CloudFront |
+| Lambda × 2 | API processing (dummy) | Managed `dotnet10` runtime |
 
-### 主要な設計判断
+### Key design decisions
 
-1. **データ参照に API サーバーを挟まない** — 「読み取り専用 + クライアント内処理」で成立する規模を前提とし、認可のみ IAM に委ねる
-2. **データバケットは CloudFront を経由させない** — ユーザー毎の認可は SigV4 署名（= IAM 評価）で行う。CloudFront 経由で per-user 制御をするには Lambda@Edge での JWT 検証が要り、複雑さに見合わない
-3. **アプリバケットとデータバケットを分離** — 公開ポリシー・CORS・キャッシュ・ライフサイクルの要件が異なる。単一バケット + プレフィックス分けは事故りやすい
-4. **アプリ本体（WASM バンドル）は秘匿しない** — 配信自体は匿名で可能（一般的な SPA と同じ）。守る対象はデータのみ
-5. **IaC は AWS CDK (C#)** — リポジトリを C# で統一でき、型付きで設定漏れに強い。Terraform でも実現可能だが .NET テンプレートとしての一体感が下がる
-6. **API のルーティングは CDK 側に置く** — Lambda Annotations の `[HttpApi]` や SAM を使うとインフラ記述が 2 箇所に割れる
+1. **No API server for reading data** — assumes a scale where "read only + processing in the client" works, and delegates only the authorization to IAM
+2. **The data bucket does not go through CloudFront** — per-user authorization is done with SigV4 signatures (= IAM evaluation). Per-user control through CloudFront would need JWT validation in Lambda@Edge, which is not worth the complexity
+3. **Separate app and data buckets** — their requirements for access policy, CORS, caching, and lifecycle differ. A single bucket split by prefixes is error-prone
+4. **The app itself (the WASM bundle) is not secret** — it can be delivered anonymously (the same as a typical SPA). Only the data is protected
+5. **AWS CDK (C#) for IaC** — the whole repository can be in C#, and typing protects against missing settings. Terraform would also work, but the template would feel less unified as a .NET template
+6. **API routing is on the CDK side** — using `[HttpApi]` of Lambda Annotations or SAM would split the infrastructure definitions into two places
 
 ---
 
-## 🔐 認証と認可
+## 🔐 Authentication and authorization
 
-### 認証（Cognito User Pool）
+### Authentication (Cognito User Pool)
 
-- **フロー**: Authorization Code + PKCE。パブリッククライアント（シークレットなし）
-- **UI**: Cognito Managed Login へリダイレクト。独自ログイン画面は作らない
-- **Authority**: `https://cognito-idp.{region}.amazonaws.com/{userPoolId}`（OIDC ディスカバリー対応）
-- **コールバック**: `authentication/login-callback`（`RemoteAuthenticatorView` の既定パス）
-- **トークン有効期限**: ID / アクセス 60 分、リフレッシュ 30 日（Cognito 既定）
-- **ログアウト**: 自前実装（理由は[実装上の落とし穴](#-実装上の落とし穴)）
+- **Flow**: Authorization Code + PKCE. Public client (no secret)
+- **UI**: Redirects to Cognito Managed Login. No custom login screen
+- **Authority**: `https://cognito-idp.{region}.amazonaws.com/{userPoolId}` (supports OIDC discovery)
+- **Callback**: `authentication/login-callback` (the default path of `RemoteAuthenticatorView`)
+- **Token lifetime**: ID / access 60 minutes, refresh 30 days (Cognito defaults)
+- **Logout**: Own implementation (for the reason, see [Implementation pitfalls](#%EF%B8%8F-implementation-pitfalls))
 
-### S3 の認可（Identity Pool + IAM）
+### S3 authorization (Identity Pool + IAM)
 
-**Principal Tag（属性ベースアクセス制御）を採用**している。
+It **uses Principal Tags (attribute-based access control)**.
 
-| 方式 | 判定 |
+| Method | Decision |
 |---|---|
-| **Principal Tag** — ID トークンの `sub` をセッションタグ `userId` にマッピングし、IAM で `${aws:PrincipalTag/userId}` を使う | **採用**。S3 のキーを User Pool の sub で切れるため、データを配置する側が sub だけ知っていればよい |
-| IdentityId 変数 — `${cognito-identity.amazonaws.com:sub}` でプレフィックスを切る古典パターン | 不採用。IdentityId は初回ログインまで確定せず、Identity Pool を作り直すと変わる。データ配置側との突合ができない |
+| **Principal Tag** — maps `sub` of the ID token to the session tag `userId` and uses `${aws:PrincipalTag/userId}` in IAM | **Adopted**. Because the S3 keys can be partitioned by the sub of the User Pool, the side that places the data only needs to know the sub |
+| IdentityId variable — the classic pattern that partitions the prefixes with `${cognito-identity.amazonaws.com:sub}` | Not adopted. The IdentityId is not fixed until the first login and changes when the Identity Pool is recreated. It cannot be matched with the side that places the data |
 
-- Identity Pool は認証済み ID のみ許可（ゲストアクセス無効）
-- 認証済みロールの信頼ポリシーには `sts:AssumeRoleWithWebIdentity` に加えて **`sts:TagSession`** が必要（セッションタグ伝播の前提条件）
+- The Identity Pool allows only authenticated identities (guest access disabled)
+- The trust policy of the authenticated role needs **`sts:TagSession`** in addition to `sts:AssumeRoleWithWebIdentity` (a prerequisite for propagating session tags)
 
-**データレイアウト**
+**Data layout**
 
 ```
 s3://{data-bucket}/
   users/
-    {userPoolSub}/          ← User Pool の sub (UUID)
+    {userPoolSub}/          ← sub of the User Pool (UUID)
       profile.json
       reports/2026-07.csv
 ```
 
-**認証済みロールの IAM ポリシー**
+**IAM policy of the authenticated role**
 
 ```json
 {
@@ -147,68 +149,68 @@ s3://{data-bucket}/
 }
 ```
 
-### API の認可（API Gateway JWT オーソライザー）
+### API authorization (API Gateway JWT authorizer)
 
-S3 と異なり、API は**トークンベース**で認可する。`Authorization: Bearer {アクセストークン}` を送り、API Gateway が署名・発行者・オーディエンスを検証する。
+Unlike S3, the API uses **token-based** authorization. The client sends `Authorization: Bearer {access token}`, and API Gateway validates the signature, issuer, and audience.
 
-アプリは API を直接ではなく **CloudFront の `/api/*` 経由**で呼ぶ。同一オリジンになるため CORS プリフライトが発生せず、CSP も `'self'` で賄える。CloudFront 側はキャッシュ無効・`Authorization` ヘッダー転送の設定になっている（Host ヘッダーだけは転送しない。API Gateway が自身のドメインを見てルーティングするため）。
+The app calls the API **through `/api/*` of CloudFront**, not directly. Because it is the same origin, no CORS preflight occurs, and `'self'` is enough for CSP. CloudFront is configured with caching disabled and forwarding of the `Authorization` header (only the Host header is not forwarded, because API Gateway routes by its own domain).
 
-- **オーソライザーは全ルートに適用**する。ルート単位で付け忘れる余地をなくすため
-- **Lambda 側に認可ロジックを置かない**。届いた時点で検証済み、という前提が重要で、二重に判定を書くと前提が曖昧になる
-- Lambda はイベントの `RequestContext.Authorizer.Jwt.Claims` からクレームを読む。**クライアント申告値ではない**ため、`sub` で処理をユーザー単位に絞れる
+- **The authorizer is applied to all routes**, to leave no room for forgetting it on a route
+- **No authorization logic in Lambda**. The premise that a request is already validated when it arrives is important, and checking twice would blur that premise
+- Lambda reads the claims from `RequestContext.Authorizer.Jwt.Claims` of the event. Because they are **not values declared by the client**, the processing can be limited per user with `sub`
 
-**Lambda 直接 Invoke を採らない理由**: Identity Pool の一時認証情報で Lambda を直接呼ぶ案（S3 と同じ IAM 認可）はインフラ追加が最小だが、**Lambda 側で呼び出し元ユーザーを検証できない**（ペイロードの sub はクライアント申告値）。per-user なサーバー処理へ発展させられない。
+**Why Lambda is not invoked directly**: Calling Lambda directly with the temporary credentials of the Identity Pool (the same IAM authorization as S3) needs the least additional infrastructure, but **Lambda cannot verify the calling user** (the sub in the payload is declared by the client). It cannot be developed into per-user server processing.
 
-**トークン種別の注意**: API Gateway はオーディエンスを `aud` **または** `client_id` で照合するため、**ID トークンを送っても検証は通る**（実測確認済み）。種別で拒否したい場合は Lambda 側で `token_use` クレームを確認する。
+**Note on token types**: API Gateway matches the audience with `aud` **or** `client_id`, so **validation passes even if an ID token is sent** (confirmed by measurement). To reject by type, check the `token_use` claim in Lambda.
 
-### シーケンス
+### Sequence
 
 ```mermaid
 sequenceDiagram
-    participant B as ブラウザ (Frontend)
+    participant B as Browser (Frontend)
     participant CF as CloudFront + S3(app)
     participant UP as Cognito User Pool
     participant IP as Cognito Identity Pool
     participant S3 as S3 (data)
 
-    B->>CF: GET / (匿名)
-    CF-->>B: index.html + WASM 一式
-    B->>UP: ログインリダイレクト (code + PKCE)
-    UP-->>B: 認可コード → トークン (ID/Access/Refresh)
-    B->>IP: GetId + GetCredentialsForIdentity (ID トークン)
-    Note over IP: sub → セッションタグ userId<br/>認証済みロールを引き受け
-    IP-->>B: 一時認証情報 (約60分)
+    B->>CF: GET / (anonymous)
+    CF-->>B: index.html + WASM files
+    B->>UP: Login redirect (code + PKCE)
+    UP-->>B: Authorization code → tokens (ID/Access/Refresh)
+    B->>IP: GetId + GetCredentialsForIdentity (ID token)
+    Note over IP: sub → session tag userId<br/>Assumes the authenticated role
+    IP-->>B: Temporary credentials (about 60 minutes)
     B->>S3: ListObjectsV2 prefix=users/{sub}/ (SigV4)
-    S3-->>B: 自分のオブジェクト一覧
+    S3-->>B: List of own objects
     B->>S3: GetObject users/{sub}/xxx (SigV4)
-    S3-->>B: ファイル内容
-    Note over B,S3: 他ユーザーの users/{other}/* は IAM 条件により AccessDenied
+    S3-->>B: File contents
+    Note over B,S3: users/{other}/* of other users is AccessDenied by the IAM condition
 ```
 
 ---
 
-## 🔧 テンプレートから新規プロジェクトを作る
+## 🔧 Creating a new project from the template
 
-このリポジトリを雛形として使う場合、まず名前を置き換える。置き換える対象は 3 系統ある。
+To use this repository as a template, first replace the names. There are three kinds of names to replace.
 
-| 系統 | 現在の値 | 使われる場所 |
+| Kind | Current value | Used in |
 |---|---|---|
-| プロジェクト名（PascalCase） | `Template` | 名前空間・プロジェクト名・ディレクトリ名・**アセンブリ名** |
-| デプロイ名（kebab-case） | `template-aws-s3-wasm` | CloudFormation スタック名 |
-| Cognito ドメイン接頭辞 | `template-s3-wasm` | Managed Login の URL |
+| Project name (PascalCase) | `Template` | Namespaces, project names, directory names, **assembly names** |
+| Deploy name (kebab-case) | `template-aws-s3-wasm` | CloudFormation stack name |
+| Cognito domain prefix | `template-s3-wasm` | URL of Managed Login |
 
-デプロイ名と Cognito ドメイン接頭辞が別値なのは、後者に予約語 `aws` を含められないため。ドメイン接頭辞は**全 AWS アカウント間で一意**である必要がある。
+The deploy name and the Cognito domain prefix are different values because the latter cannot contain the reserved word `aws`. The domain prefix must be **unique across all AWS accounts**.
 
-### 手順
+### Steps
 
-リポジトリルートで実行する。先頭 3 行だけ自分の値に変える。
+Run at the repository root. Change only the first three lines to your own values.
 
 ```powershell
-$Name   = 'Acme'          # PascalCase。名前空間・アセンブリ名になる
-$Deploy = 'acme-portal'   # kebab-case。CloudFormation スタック名になる
-$Domain = 'acme-portal'   # Cognito ドメイン接頭辞。aws/amazon/cognito を含められない
+$Name   = 'Acme'          # PascalCase. Becomes the namespaces and assembly names
+$Deploy = 'acme-portal'   # kebab-case. Becomes the CloudFormation stack name
+$Domain = 'acme-portal'   # Cognito domain prefix. Cannot contain aws/amazon/cognito
 
-# 1. ファイル内容を置換（.git と成果物ディレクトリは除外）
+# 1. Replace the file contents (excluding .git and the output directories)
 Get-ChildItem -Recurse -File |
     Where-Object { $_.FullName -notmatch '\\(\.git|bin|obj|publish-api|publish-app|cdk\.out|node_modules)\\' } |
     ForEach-Object {
@@ -217,179 +219,179 @@ Get-ChildItem -Recurse -File |
         if ($new -ne $body) { Set-Content $_.FullName $new -NoNewline }
     }
 
-# 2. プロジェクトファイルとディレクトリをリネーム
+# 2. Rename the project files and directories
 foreach ($p in 'Backend', 'Frontend', 'IaC') {
     Rename-Item "Template.$p/Template.$p.csproj" "$Name.$p.csproj"
     Rename-Item "Template.$p" "$Name.$p"
 }
 Get-ChildItem -Filter 'Template.sln*' | ForEach-Object { Rename-Item $_.FullName ($_.Name -replace '^Template', $Name) }
 
-# 3. 確認
+# 3. Verify
 dotnet build
 ```
 
-> ⚠️ 置換は必ず**ドット付きの `Template.`** で行う。`Template` 単体で置換すると、本文中の「テンプレート」の説明や無関係な識別子まで巻き込む。
+> ⚠️ Always replace **`Template.` with the dot**. Replacing `Template` alone also hits descriptions of the template in the text and unrelated identifiers.
 
-置換後、この節はもう不要なので README から削除してよい。
+After the replacement, this section is no longer needed and can be removed from the README.
 
-なお、次の 2 つは**識別子ではなく画面に出る文言**なので上の置換では変わらない。プロジェクトに合わせて手で書き換える。
+Note that the following two are **text displayed on screen, not identifiers**, so the replacement above does not change them. Rewrite them by hand to fit your project.
 
-| ファイル | 文言 |
+| File | Text |
 |---|---|
-| `{Name}.Frontend/Components/Layout/MainLayout.razor` | ヘッダーの `S3 + Cognito WASM Template` |
-| `{Name}.Frontend/Components/Pages/Home.razor` | 説明文の `Template application that ...` |
+| `{Name}.Frontend/Components/Layout/MainLayout.razor` | `S3 + Cognito WASM Template` in the header |
+| `{Name}.Frontend/Components/Pages/Home.razor` | `Template application that ...` in the description |
 
-### 置換漏れで最も事故る箇所
+### The most error-prone place for missed replacements
 
-`{Name}.IaC/ApiConstruct.cs` の Lambda ハンドラー名は、**間違っていてもデプロイが成功してしまう**。
+Even if the Lambda handler names in `{Name}.IaC/ApiConstruct.cs` are wrong, **the deployment still succeeds**.
 
 ```csharp
 Handler = $"Template.Backend::Template.Backend.Functions.{functionClass}_Handle_Generated::Handle",
 ```
 
-CloudFormation はこの文字列を検証しないため、アセンブリ名がずれていると `cdk deploy` は正常終了し、**API 呼び出しだけが実行時に 500**（`Could not find the specified handler assembly`）になる。上の手順どおり置換すれば直るが、手作業でリネームした場合はここを最初に疑う。
+CloudFormation does not validate this string, so if the assembly name is wrong, `cdk deploy` finishes normally and **only the API calls fail with 500 at run time** (`Could not find the specified handler assembly`). Replacing as in the steps above fixes it, but suspect this place first if you renamed by hand.
 
-同様に、次の 2 つがずれるとデプロイは通るのにスクリプトが動かなくなる。
+Similarly, if the following two do not match, the deployment succeeds but the scripts stop working.
 
-- `{Name}.IaC/Program.cs` のスタック ID と `scripts/common.ps1` の `$stack` — ずれると cdk outputs を読めない
-- `{Name}.IaC/cdk.json` の `domainPrefix` — 他アカウントで使用中の名前だと `InvalidRequest` で失敗する
+- The stack ID in `{Name}.IaC/Program.cs` and `$stack` in `scripts/common.ps1` — if they differ, the cdk outputs cannot be read
+- `domainPrefix` in `{Name}.IaC/cdk.json` — a name in use by another account fails with `InvalidRequest`
 
-### リネーム後の確認
+### Checking after renaming
 
-そのまま次の[セットアップ](#-セットアップ初回構築)を実施する。**「API」ページの 2 つの呼び出しが 200 になること**を必ず確認する。ハンドラー名の置換漏れはここでしか露見しない。
+Continue with the [setup](#-setup-initial-build) below. Always check that **the two calls on the "API" page return 200**. A missed replacement of a handler name shows up only here.
 
 ---
 
-## 🚀 セットアップ（初回構築）
+## 🚀 Setup (initial build)
 
-### 必要なもの
+### Requirements
 
 - .NET SDK 10.0+
-- Node.js 20+（CDK CLI 実行用）
-- AWS CLI v2（認証情報設定済み）
+- Node.js 20+ (to run the CDK CLI)
+- AWS CLI v2 (with credentials configured)
 
-### 事前設定
+### Preparation
 
-`Template.IaC/cdk.json` の `context.dev.domainPrefix` を**一意な値**へ変更する。Cognito Managed Login のドメイン名になるため、全 AWS アカウント間で一意である必要がある。
+Change `context.dev.domainPrefix` in `Template.IaC/cdk.json` to a **unique value**. It becomes the domain name of Cognito Managed Login, so it must be unique across all AWS accounts.
 
-> ⚠️ 小文字英数字とハイフンのみ。予約語 `aws` / `amazon` / `cognito` を**含められない**（含めるとデプロイ時に `InvalidRequest` で失敗する）。リポジトリ名をそのまま使うと引っかかることがある。
+> ⚠️ Only lowercase letters, digits, and hyphens. It **cannot contain** the reserved words `aws` / `amazon` / `cognito` (if it does, the deployment fails with `InvalidRequest`). Using the repository name as is may hit this.
 
-### 構築手順
+### Build steps
 
 ```powershell
-# 1. Lambda の成果物を用意（CDK がアセットとして取り込む）
+# 1. Prepare the Lambda artifact (CDK takes it in as an asset)
 ./scripts/deploy-api.ps1
 
-# 2. インフラをデプロイ
+# 2. Deploy the infrastructure
 cd Template.IaC
-npx --yes aws-cdk@latest bootstrap        # アカウント×リージョンで初回のみ
+npx --yes aws-cdk@latest bootstrap        # Only the first time per account × region
 npx --yes aws-cdk@latest deploy -c env=dev --outputs-file ../cdk-outputs.dev.json
 cd ..
 
-# 3. ローカル開発用の設定へ反映
+# 3. Apply the outputs to the settings for local development
 ./scripts/update-appsettings.ps1 -Env dev
 
-# 4. テストユーザー + サンプルデータ投入
+# 4. Add a test user + sample data
 ./scripts/seed-user.ps1 -Env dev -Email user1@example.com
 
-# 5. アプリをビルドして配信
+# 5. Build and deliver the app
 ./scripts/deploy-app.ps1 -Env dev
 ```
 
-完了時に表示される URL へアクセスし、`seed-user.ps1` が出力した Email / Password でログインする。
+Open the URL displayed at the end, and log in with the Email / Password output by `seed-user.ps1`.
 
-### 動作確認の観点
+### What to check
 
-- 未ログインで `/files` へアクセス → ログインへリダイレクトされる
-- ログイン後、自分のデータファイルの一覧・集計値・グラフ・明細テーブルが表示される
-- 一覧の「open raw」（S3 直リンク）は、**ログイン中でも**ブラウザで開くと `AccessDenied` になる
-- ユーザーを 2 人作成し、他ユーザーのキーを指定した取得が AccessDenied になる
-- 「API」ページの 2 つの呼び出しが成功し、返る `sub` が自分のものになる
-- `/hello` を連続で叩くと `invocation` が増える（同じ実行環境が再利用されている）
-- **トークンなしで API を叩くと 401 になり、Lambda が起動しない**
-  （`curl https://{ApiEndpoint}/hello` → 401。CloudWatch Logs に呼び出し記録が増えないこと）
-- ディープリンクの直接アクセス・リロードが動作する（SPA フォールバック）
-
----
-
-## 🔄 更新時のデプロイ
-
-変更した箇所によって実行するものが変わる。
-
-| 変更した箇所 | 実行するもの |
-|---|---|
-| **Template.Frontend のみ** | `./scripts/deploy-app.ps1 -Env dev` |
-| **Template.Backend（Lambda）** | `./scripts/deploy-api.ps1` → `cd Template.IaC; npx --yes aws-cdk@latest deploy -c env=dev --outputs-file ../cdk-outputs.dev.json` |
-| **Template.IaC** | 同上（Template.Backend を変えていなければ `deploy-api.ps1` は不要） |
-| **Template.IaC を変えて出力値が変わった** | 上記の後に `./scripts/update-appsettings.ps1 -Env dev` と `deploy-app.ps1` |
-
-`deploy-app.ps1` は publish 前に `appsettings.Production.json` を cdk outputs から自動生成する（配信された WASM アプリは常に Production 環境として動作するため）。生成物は gitignore 対象。
-
-### prod 環境
-
-`-c env=prod` でデプロイする。dev との違いは次のとおり。
-
-- バケットと User Pool が **RETAIN + 削除保護**になる（誤削除でデータが消えない）
-- localhost のコールバック URL / CORS 許可が**付かない**
-- ログ保持期間が 1 か月になる
+- Accessing `/files` without logging in → redirected to the login
+- After logging in, the list of your own data files, the summary values, the chart, and the detail table are displayed
+- "open raw" (a direct S3 link) in the list returns `AccessDenied` when opened in the browser, **even while logged in**
+- Create two users, and getting an object with another user's key returns AccessDenied
+- The two calls on the "API" page succeed, and the returned `sub` is your own
+- Calling `/hello` repeatedly increases `invocation` (the same execution environment is reused)
+- **Calling the API without a token returns 401, and Lambda does not start**
+  (`curl https://{ApiEndpoint}/hello` → 401. No new invocation records appear in CloudWatch Logs)
+- Direct access to deep links and reloading work (SPA fallback)
 
 ---
 
-## 🌏 デプロイ先を変更する
+## 🔄 Deploying updates
 
-リージョン・アカウント・スタック名を変える場合に触る箇所。**リージョンとスタック名はコードに定数として散らばっているため、下表を漏れなく直すこと**（一箇所でも漏れるとデプロイは通るのに実行時に失敗する）。
+What to run depends on what you changed.
 
-### リージョンを変える
-
-| ファイル | 箇所 |
+| Changed | What to run |
 |---|---|
-| `Template.IaC/EnvironmentConfig.cs` | `Region` 定数 |
+| **Template.Frontend only** | `./scripts/deploy-app.ps1 -Env dev` |
+| **Template.Backend (Lambda)** | `./scripts/deploy-api.ps1` → `cd Template.IaC; npx --yes aws-cdk@latest deploy -c env=dev --outputs-file ../cdk-outputs.dev.json` |
+| **Template.IaC** | Same as above (`deploy-api.ps1` is not needed if Template.Backend is unchanged) |
+| **Template.IaC, and the output values changed** | After the above, `./scripts/update-appsettings.ps1 -Env dev` and `deploy-app.ps1` |
+
+`deploy-app.ps1` generates `appsettings.Production.json` from the cdk outputs before publishing (because the delivered WASM app always runs as the Production environment). The generated file is gitignored.
+
+### prod environment
+
+Deploy with `-c env=prod`. The differences from dev are as follows.
+
+- The buckets and the User Pool are **RETAIN + deletion protection** (data is not lost by accidental deletion)
+- The localhost callback URL / CORS permission is **not added**
+- The log retention period is 1 month
+
+---
+
+## 🌏 Changing the deployment target
+
+The places to change when changing the region, account, or stack name. **The region and the stack name are scattered in the code as constants, so fix every place in the tables below** (if even one is missed, the deployment succeeds but fails at run time).
+
+### Changing the region
+
+| File | Place |
+|---|---|
+| `Template.IaC/EnvironmentConfig.cs` | `Region` constant |
 | `scripts/common.ps1` | `$Script:Region` |
-| `Template.Frontend/wwwroot/index.html` | `preconnect` の 2 行（Cognito のホスト名にリージョンが入る） |
-| `Template.Frontend/wwwroot/appsettings.json` | プレースホルダーのリージョン表記（実値はデプロイ時に自動生成されるので、体裁のみ） |
+| `Template.Frontend/wwwroot/index.html` | The two `preconnect` lines (the Cognito host names contain the region) |
+| `Template.Frontend/wwwroot/appsettings.json` | The region in the placeholders (the actual values are generated at deployment, so this is only for consistency) |
 
-CSP と CORS のリージョンは `EnvironmentConfig.Region` から組み立てられるため、追加の変更は不要。
+The regions in CSP and CORS are built from `EnvironmentConfig.Region`, so no additional changes are needed.
 
-その後、新リージョンで `npx --yes aws-cdk@latest bootstrap` を実行してからデプロイする。
+Then run `npx --yes aws-cdk@latest bootstrap` in the new region before deploying.
 
-### AWS アカウントを変える
+### Changing the AWS account
 
-1. AWS CLI の認証情報を切り替える（プロファイル指定なら `$env:AWS_PROFILE`）
-2. 新アカウント × リージョンで `bootstrap` を実行
-3. `Template.IaC/cdk.json` の `domainPrefix` を変更する（**Cognito のドメインは全 AWS アカウント間で一意**のため、他アカウントで使用中の名前は取れない）
+1. Switch the credentials of the AWS CLI (`$env:AWS_PROFILE` when using a profile)
+2. Run `bootstrap` for the new account × region
+3. Change `domainPrefix` in `Template.IaC/cdk.json` (**Cognito domains are unique across all AWS accounts**, so a name in use by another account cannot be taken)
 
-### スタック名を変える
+### Changing the stack name
 
-| ファイル | 箇所 |
+| File | Place |
 |---|---|
-| `Template.IaC/Program.cs` | スタック ID（`template-aws-s3-wasm-{envName}`） |
-| `scripts/common.ps1` | `$stack` の組み立て（cdk outputs の JSON をこの名前で引く） |
+| `Template.IaC/Program.cs` | Stack ID (`template-aws-s3-wasm-{envName}`) |
+| `scripts/common.ps1` | How `$stack` is built (the JSON of the cdk outputs is looked up by this name) |
 
-両者がずれると、デプロイは成功するのにスクリプトが outputs を読めなくなる。
+If the two do not match, the deployment succeeds, but the scripts cannot read the outputs.
 
-### ローカル開発ポートを変える
+### Changing the local development port
 
-`Template.Frontend/Properties/launchSettings.json` と `Template.IaC/EnvironmentConfig.cs` の `LocalhostOrigin` を**両方**変更する。後者は dev の Cognito コールバック URL と S3 の CORS 許可オリジンになるため、ずれるとローカルからのログインとデータ取得が失敗する。
+Change **both** `Template.Frontend/Properties/launchSettings.json` and `LocalhostOrigin` in `Template.IaC/EnvironmentConfig.cs`. The latter becomes the Cognito callback URL of dev and the allowed CORS origin of S3, so if they differ, logging in and getting data from local fail.
 
-### 環境（dev / prod）を増やす
+### Adding environments (dev / prod)
 
-`Template.IaC/cdk.json` の `context` に新しいキーを足し、`domainPrefix` と `allowLocalhost` を定義する。スクリプトの `-Env` は `dev` / `prod` に制限されているため、増やす場合は各スクリプトの `ValidateSet` も更新する。
+Add a new key to `context` in `Template.IaC/cdk.json`, and define `domainPrefix` and `allowLocalhost`. `-Env` of the scripts is limited to `dev` / `prod`, so when adding environments, also update `ValidateSet` of each script.
 
 ---
 
-## 🧹 削除（片付け）
+## 🧹 Removal (cleanup)
 
 ```powershell
 cd Template.IaC
 npx --yes aws-cdk@latest destroy -c env=dev
 ```
 
-**dev 環境**はバケットの自動削除（`autoDeleteObjects`）と LogGroup の削除込みで、スタック管理下のリソースは残骸なく消える。ただし `/aws/lambda/{スタック名}-CustomS3AutoDeleteObjects-*` の LogGroup だけは残る。バケットを空にする CDK 内蔵の Lambda が初回実行時に暗黙生成するもので、CloudFormation の管理外にあるため削除対象に含まれない。中身は空でコストもかからないが、気になる場合は手動で削除する。
+In the **dev environment**, with the automatic deletion of the buckets (`autoDeleteObjects`) and of the LogGroups, the resources managed by the stack are removed without leftovers. However, only the LogGroup `/aws/lambda/{stack name}-CustomS3AutoDeleteObjects-*` remains. It is created implicitly when the Lambda built into CDK that empties the buckets first runs, and it is not removed because it is outside CloudFormation management. It is empty and costs nothing, but remove it manually if you prefer.
 
-**prod 環境**はバケット・User Pool が RETAIN + 削除保護のため、スタック削除後にそれらを手動で削除する必要がある。データ保全を優先した意図的な設計。API の LogGroup も同じく RETAIN なので残る。
+In the **prod environment**, the buckets and the User Pool are RETAIN + deletion protection, so they must be removed manually after deleting the stack. This is an intentional design that prioritizes protecting the data. The LogGroup of the API is also RETAIN, so it remains.
 
 ```powershell
-# 残骸の確認（スタック削除後）
+# Check for leftovers (after deleting the stack)
 aws s3api list-buckets --query "Buckets[?contains(Name,'template-aws-s3-wasm')].Name"
 aws cognito-idp list-user-pools --max-results 60 --query "UserPools[?contains(Name,'template')].[Id,Name]"
 aws logs describe-log-groups --query "logGroups[?contains(logGroupName,'template-aws-s3-wasm')].logGroupName"
@@ -397,94 +399,94 @@ aws logs describe-log-groups --query "logGroups[?contains(logGroupName,'template
 
 ---
 
-## 📁 プログラム構成
+## 📁 Program structure
 
 ```
 template-aws-s3-wasm/
 ├── .editorconfig / Analyzers.ruleset / Directory.Build.props / Directory.Build.targets
-├── AGENTS.md                                ← コーディング規約
-├── Template.slnx                            ← ソリューション (3 プロジェクト)
+├── AGENTS.md                                ← Coding conventions
+├── Template.slnx                            ← Solution (3 projects)
 │
-├── Template.Backend/                                 ← Lambda (net10.0, マネージド dotnet10 ランタイム)
-│   ├── Startup.cs                           ← [LambdaStartup]。DI コンテナへの登録
+├── Template.Backend/                                 ← Lambda (net10.0, managed dotnet10 runtime)
+│   ├── Startup.cs                           ← [LambdaStartup]. Registration to the DI container
 │   ├── Functions/
-│   │   ├── HelloFunction.cs                 ← GET /hello。検証済みクレームを返す
-│   │   └── EchoFunction.cs                  ← POST /echo。JSON ボディを受け取る
-│   ├── Services/InvocationCounter.cs        ← ウォームスタート間で生き残る Singleton
-│   ├── Application/                         ← Claims（クレーム抽出）/ Json（レスポンス生成）
+│   │   ├── HelloFunction.cs                 ← GET /hello. Returns the validated claims
+│   │   └── EchoFunction.cs                  ← POST /echo. Receives a JSON body
+│   ├── Services/InvocationCounter.cs        ← Singleton that survives across warm starts
+│   ├── Application/                         ← Claims (extracting claims) / Json (creating responses)
 │   ├── Models/                              ← HelloResponse / EchoModels
-│   ├── FunctionSerializerContext.cs         ← 全関数で共有（LambdaSerializer はアセンブリ単位）
-│   ├── Assembly.cs                          ← CLSCompliant + LambdaSerializer 属性
+│   ├── FunctionSerializerContext.cs         ← Shared by all functions (LambdaSerializer is per assembly)
+│   ├── Assembly.cs                          ← CLSCompliant + LambdaSerializer attributes
 │   └── GlobalUsing.cs / GlobalSuppressions.cs
 │
 ├── Template.Frontend/                                ← Blazor WebAssembly (net10.0)
-│   ├── Program.cs                           ← DI 構成
+│   ├── Program.cs                           ← DI configuration
 │   ├── Assembly.cs / GlobalUsing.cs / GlobalSuppressions.cs / Log.cs
 │   ├── Application/
-│   │   ├── BrowserHttpClientFactory.cs      ← AWS SDK を browser-wasm で動かすための HTTP 差し替え
-│   │   ├── SeriesParser.cs                  ← CSV → DataSeries のパース
-│   │   └── ViewHelper.cs                    ← 表示ヘルパー（@using static でマークアップから使用）
+│   │   ├── BrowserHttpClientFactory.cs      ← Replaces the HTTP handling to run the AWS SDK on browser-wasm
+│   │   ├── SeriesParser.cs                  ← Parses CSV → DataSeries
+│   │   └── ViewHelper.cs                    ← View helper (used from markup with @using static)
 │   ├── Auth/
-│   │   ├── OidcTokenAccessor.cs             ← sessionStorage から ID トークン読み出し
-│   │   ├── AwsCredentialsProvider.cs        ← ID トークン→一時認証情報の取得とキャッシュ
-│   │   └── SignOutService.cs                ← Cognito /logout への自前サインアウト
+│   │   ├── OidcTokenAccessor.cs             ← Reads the ID token from sessionStorage
+│   │   ├── AwsCredentialsProvider.cs        ← Gets and caches temporary credentials from the ID token
+│   │   └── SignOutService.cs                ← Own sign-out to /logout of Cognito
 │   ├── Components/
 │   │   ├── App.razor / _Imports.razor / RedirectToLogin.cs
-│   │   ├── Chart/SeriesChart.razor(.cs)     ← インライン SVG グラフ
-│   │   ├── Layout/MainLayout.razor(.cs)     ← ログイン状態表示 + ログイン/ログアウト
+│   │   ├── Chart/SeriesChart.razor(.cs)     ← Inline SVG chart
+│   │   ├── Layout/MainLayout.razor(.cs)     ← Login state + login/logout
 │   │   └── Pages/
-│   │       ├── Home.razor                   ← 認証状態とクレーム表示
-│   │       ├── Files.razor(.cs)             ← [Authorize] 一覧・集計・グラフ・明細・直リンク
-│   │       ├── Api.razor(.cs)               ← [Authorize] 認証付き API の呼び出しと結果表示
+│   │       ├── Home.razor                   ← Authentication state and claims
+│   │       ├── Files.razor(.cs)             ← [Authorize] List, summary, chart, details, direct links
+│   │       ├── Api.razor(.cs)               ← [Authorize] Calls the authenticated API and shows the results
 │   │       ├── Authentication.razor(.cs)    ← RemoteAuthenticatorView ({action})
 │   │       └── NotFound.razor
-│   ├── Helpers/MediaHelper.cs               ← 描画可否のメディア判定
+│   ├── Helpers/MediaHelper.cs               ← Decides whether a media type can be rendered
 │   ├── Models/                              ← UserFile / SeriesPoint / DataSeries / HelloResponse
 │   ├── Services/
-│   │   ├── UserFileRepository.cs            ← 自分のプレフィックスの List / Get、直リンク生成
-│   │   └── ApiClient.cs                     ← 認証付き API の呼び出し
-│   ├── Settings/AppSetting.cs               ← appsettings.json の App セクション
-│   └── wwwroot/                             ← index.html（スプラッシュ付き）/ appsettings*.json / css
+│   │   ├── UserFileRepository.cs            ← List / Get of the own prefix, and creating direct links
+│   │   └── ApiClient.cs                     ← Calls the authenticated API
+│   ├── Settings/AppSetting.cs               ← App section of appsettings.json
+│   └── wwwroot/                             ← index.html (with a splash) / appsettings*.json / css
 │
-├── Template.IaC/                                     ← AWS CDK (C#)。Constructs パッケージとの名前空間衝突を避けフラット構成
-│   ├── cdk.json                             ← 環境別 context（domainPrefix / allowLocalhost）
-│   ├── Program.cs                           ← App エントリ（-c env=dev|prod）
-│   ├── EnvironmentConfig.cs                 ← context の読み取りとリージョン等の定数
-│   ├── Infrastructure.cs                    ← スタック本体（CA1711 対応で 'Stack' サフィックスを避けた命名）
-│   ├── HostingConstruct.cs                  ← アプリバケット + CloudFront
-│   ├── AuthConstruct.cs                     ← User Pool + Client + Domain + Identity Pool + ロール
-│   ├── DataConstruct.cs                     ← データバケット + CORS
-│   └── ApiConstruct.cs                      ← Lambda + HTTP API + JWT オーソライザー
+├── Template.IaC/                                     ← AWS CDK (C#). Flat structure to avoid namespace collisions with the Constructs package
+│   ├── cdk.json                             ← Context per environment (domainPrefix / allowLocalhost)
+│   ├── Program.cs                           ← App entry (-c env=dev|prod)
+│   ├── EnvironmentConfig.cs                 ← Reads the context, and constants such as the region
+│   ├── Infrastructure.cs                    ← Stack body (named without the 'Stack' suffix because of CA1711)
+│   ├── HostingConstruct.cs                  ← App bucket + CloudFront
+│   ├── AuthConstruct.cs                     ← User Pool + Client + Domain + Identity Pool + roles
+│   ├── DataConstruct.cs                     ← Data bucket + CORS
+│   └── ApiConstruct.cs                      ← Lambda + HTTP API + JWT authorizer
 │
-├── scripts/                                 ← 下記「scripts 一覧」参照
-└── README.md                                ← 本書
+├── scripts/                                 ← See "Scripts" below
+└── README.md                                ← This document
 ```
 
-### 主要コンポーネント
+### Key components
 
 **Template.Frontend / Program.cs**
 
-- `AWSConfigs.HttpClientFactory` の差し替えを**他のどの AWS 呼び出しよりも前**に行う
-- `AddOidcAuthentication` の設定は appsettings から。`email` スコープのみコード側で追加する（設定ファイルに書くと既定スコープと重複する）
-- 起動時のデータ読み込みは行わない（認証前は資格情報が無いため、ページ表示時に取得する）
+- Replace `AWSConfigs.HttpClientFactory` **before any other AWS call**
+- The settings of `AddOidcAuthentication` come from appsettings. Only the `email` scope is added in code (writing it in the settings file duplicates the default scopes)
+- No data is loaded at startup (there are no credentials before authentication, so data is fetched when a page is displayed)
 
 **Template.Frontend / AwsCredentialsProvider**
 
-- `IAccessTokenProvider.RequestAccessToken()` でセッションの有効性を確保した上で、ID トークンを `OidcTokenAccessor` 経由で取得
-- 匿名クライアントで `GetId` → `GetCredentialsForIdentity`。IdentityId はセッションにキャッシュし、ページ読み込みごとの `GetId` を省く
-- 認証情報は失効 5 分前まで再利用。取得できない場合は例外ではなく `null` を返し、呼び出し側が再ログインへ誘導する
+- After ensuring that the session is valid with `IAccessTokenProvider.RequestAccessToken()`, gets the ID token through `OidcTokenAccessor`
+- `GetId` → `GetCredentialsForIdentity` with an anonymous client. The IdentityId is cached in the session to skip `GetId` on each page load
+- Credentials are reused until 5 minutes before they expire. If they cannot be obtained, it returns `null` instead of throwing, and the caller leads the user to log in again
 
 **Template.Frontend / UserFileRepository**
 
-- `ListAsync(sub)` は継続トークンで全件取得。`ObjectUrl(key)` は画面に出す直リンク（セグメント単位で URL エスケープ）
-- `AmazonS3Client` は認証情報が更新されるまで使い回す
-- sub はクレームから取得してキー組み立てに使うが、**セキュリティ境界は IAM 側**。クライアントでキーを細工しても他ユーザーのデータには到達できない
+- `ListAsync(sub)` gets all items with continuation tokens. `ObjectUrl(key)` is the direct link shown on screen (URL-escaped per segment)
+- `AmazonS3Client` is reused until the credentials are renewed
+- The sub is taken from the claims and used to build the keys, but **the security boundary is on the IAM side**. Even if the client tampers with the keys, it cannot reach other users' data
 
-**Template.IaC の構築順**
+**Build order of Template.IaC**
 
-構築順は参照の連鎖で決まり、**Api（本体のみ）→ Hosting → Data → Auth → Api（ルート追加）** となる。CloudFront の `/api/*` オリジンに API のホスト名が要り、App Client の callback URL とデータバケットの CORS に CloudFront ドメインが要り、JWT オーソライザーに App Client が要る、という依存関係のため。`ApiConstruct` を「本体だけ先に作り、あとから `AddRoutes` でルートとオーソライザーを足す」2 段構えにしているのは、この連鎖を循環させないため（`AWS::ApiGatewayV2::Api` 自体は何にも依存しない）。Identity Pool は認可の仕組みが見えるよう L1 (`Cfn*`) で構築している。
+The build order is determined by the chain of references: **Api (body only) → Hosting → Data → Auth → Api (adding routes)**. This is because the `/api/*` origin of CloudFront needs the host name of the API, the callback URL of the App Client and the CORS of the data bucket need the CloudFront domain, and the JWT authorizer needs the App Client. `ApiConstruct` is built in two steps, "create only the body first, and add the routes and the authorizer later with `AddRoutes`", to keep this chain from becoming circular (`AWS::ApiGatewayV2::Api` itself depends on nothing). The Identity Pool is built with L1 (`Cfn*`) so that the authorization mechanism is visible.
 
-### 設定ファイル（wwwroot/appsettings.json）
+### Settings file (wwwroot/appsettings.json)
 
 ```json
 {
@@ -504,33 +506,33 @@ template-aws-s3-wasm/
 }
 ```
 
-> ここに載る値は**すべて公開可能**。パブリッククライアント前提で、認可は IAM と API Gateway が担保する。バケット名の推測に対してもパブリックアクセスブロックで防御している。
+> **All the values here can be public**. It is a public client, and IAM and API Gateway ensure the authorization. Guessing the bucket names is also defended against by the public access block.
 
 ---
 
-## 📜 scripts 一覧
+## 📜 Scripts
 
-すべて PowerShell。リポジトリルートから実行する。
+All are PowerShell. Run them from the repository root.
 
-| スクリプト | 用途 | 主な引数 |
+| Script | Purpose | Main arguments |
 |---|---|---|
-| `deploy-api.ps1` | Template.Backend を `publish-api/` へ publish する。CDK がアセットとして取り込むため、**`cdk deploy` の前**に実行する | なし |
-| `update-appsettings.ps1` | cdk outputs から `appsettings.Development.json` を生成する（ローカル開発用） | `-Env dev\|prod` |
-| `seed-user.ps1` | テストユーザーを作成し、`users/{sub}/` へサンプルデータを配置する。実ユーザーの発行手順もこれに準じる | `-Email` (必須) / `-Env` / `-Password` |
-| `deploy-app.ps1` | Template.Frontend を publish して S3 へ同期し、CloudFront を無効化する。`appsettings.Production.json` の生成も行う | `-Env dev\|prod` |
-| `common.ps1` | 上記から dot-source される共通処理（cdk outputs の読み取り、appsettings 生成）。**直接実行しない** | — |
+| `deploy-api.ps1` | Publishes Template.Backend to `publish-api/`. CDK takes it in as an asset, so run it **before `cdk deploy`** | None |
+| `update-appsettings.ps1` | Generates `appsettings.Development.json` from the cdk outputs (for local development) | `-Env dev\|prod` |
+| `seed-user.ps1` | Creates a test user and places sample data in `users/{sub}/`. Issuing real users follows the same steps | `-Email` (required) / `-Env` / `-Password` |
+| `deploy-app.ps1` | Publishes Template.Frontend, syncs it to S3, and invalidates CloudFront. Also generates `appsettings.Production.json` | `-Env dev\|prod` |
+| `common.ps1` | Shared processing dot-sourced by the above (reading the cdk outputs, generating appsettings). **Do not run it directly** | — |
 
-いずれも `cdk-outputs.{env}.json` をリポジトリルートから読む。`cdk deploy` 時に `--outputs-file` を付け忘れると動かない。
+All of them read `cdk-outputs.{env}.json` from the repository root. They do not work if `--outputs-file` is forgotten in `cdk deploy`.
 
 ---
 
-## 🧰 手動での操作手順
+## 🧰 Manual procedures
 
-上記スクリプトが実行しているコマンドそのもの。CI へ組み込む・別マシンで作業する・スクリプトが途中で失敗した箇所だけやり直す、といった場合に参照する。
+These are the commands that the scripts above run. Refer to them when integrating into CI, working on another machine, or redoing only the part where a script failed.
 
-### 共通: スタック出力の取得
+### Common: getting the stack outputs
 
-以降の手順はすべてスタックの出力値を使う。`--outputs-file` を使っていない場合は CloudFormation から直接引ける。
+All the following steps use the output values of the stack. If you do not use `--outputs-file`, they can be read directly from CloudFormation.
 
 ```powershell
 $EnvName = 'dev'
@@ -541,23 +543,23 @@ $o = @{}
 $o
 ```
 
-取得できるキー: `CloudFrontDomain` / `DistributionId` / `AppBucketName` / `DataBucketName` / `UserPoolId` / `UserPoolClientId` / `CognitoDomain` / `IdentityPoolId` / `ApiEndpoint`
+Available keys: `CloudFrontDomain` / `DistributionId` / `AppBucketName` / `DataBucketName` / `UserPoolId` / `UserPoolClientId` / `CognitoDomain` / `IdentityPoolId` / `ApiEndpoint`
 
-### 1. 環境構築
+### 1. Building the environment
 
 ```powershell
-# (1) Lambda 成果物を publish-api/ に用意する
-#     出力先はリポジトリルート直下であること（ApiConstruct が {cwd}/../publish-api を参照する）
+# (1) Prepare the Lambda artifact in publish-api/
+#     The output must be directly under the repository root (ApiConstruct refers to {cwd}/../publish-api)
 dotnet publish Template.Backend/Template.Backend.csproj -c Release -o publish-api
 
-# (2) デプロイ
+# (2) Deploy
 cd Template.IaC
-npx --yes aws-cdk@latest bootstrap     # アカウント × リージョンで初回のみ
+npx --yes aws-cdk@latest bootstrap     # Only the first time per account × region
 npx --yes aws-cdk@latest deploy -c env=dev
 cd ..
 ```
 
-続けて、アプリが読む設定ファイルを出力値から作る。**配信されたアプリは常に Production 環境として動く**ため `Template.Frontend/wwwroot/appsettings.Production.json` を作成する（ローカル開発用は同じ形の `appsettings.Development.json`）。
+Next, create the settings file that the app reads from the output values. **The delivered app always runs as the Production environment**, so create `Template.Frontend/wwwroot/appsettings.Production.json` (for local development, `appsettings.Development.json` in the same form).
 
 ```json
 {
@@ -577,29 +579,29 @@ cd ..
 }
 ```
 
-### 2. アプリケーション更新時のデプロイ
+### 2. Deploying application updates
 
 ```powershell
-# (1) 上記 appsettings.Production.json を最新の出力値で更新しておく
+# (1) Update the appsettings.Production.json above with the latest output values
 
-# (2) publish。出力先は毎回消す
-#     dotnet publish -o はクリーンしないため、古い指紋付きアセットが残り続けて上がり続ける
+# (2) Publish. Delete the output directory every time
+#     dotnet publish -o does not clean it, so old fingerprinted assets stay and keep being uploaded
 Remove-Item -Recurse -Force publish -ErrorAction SilentlyContinue
 dotnet publish Template.Frontend/Template.Frontend.csproj -c Release -o publish
 
-# (3) S3 へ同期。まず全部 no-cache で上げる
-#     .br / .gz を除外するのは、S3 オリジンがコンテンツネゴシエーションをしないため
-#     （実際に配信されるのは CloudFront の動的圧縮）
+# (3) Sync to S3. First upload everything with no-cache
+#     .br / .gz are excluded because the S3 origin does no content negotiation
+#     (what is actually delivered is the dynamic compression of CloudFront)
 aws s3 sync publish/wwwroot "s3://$($o.AppBucketName)" --delete `
     --exclude '*.br' --exclude '*.gz' --exclude 'appsettings.Development.json' `
     --cache-control 'no-cache'
 
-# 除外したファイルは --delete の対象外になるので、過去のデプロイ分を明示的に消す
+# Excluded files are not covered by --delete, so explicitly delete those of past deployments
 aws s3 rm "s3://$($o.AppBucketName)" --recursive `
     --exclude '*' --include '*.br' --include '*.gz' --include 'appsettings.Development.json'
 
-# (4) _framework/ 配下の指紋付きアセットだけ長期キャッシュへ昇格し、同時に Content-Type を固定する
-#     （.wasm を application/octet-stream と推測されると CloudFront の圧縮対象から外れる）
+# (4) Promote only the fingerprinted assets under _framework/ to long-term caching, and fix the Content-Type at the same time
+#     (if .wasm is guessed as application/octet-stream, CloudFront does not compress it)
 $immutable = 'public, max-age=31536000, immutable'
 aws s3 cp "s3://$($o.AppBucketName)/_framework/" "s3://$($o.AppBucketName)/_framework/" --recursive `
     --exclude '*' --include '*.wasm' `
@@ -608,8 +610,8 @@ aws s3 cp "s3://$($o.AppBucketName)/_framework/" "s3://$($o.AppBucketName)/_fram
     --exclude '*' --include '*.js' --exclude 'dotnet.js' --exclude 'blazor.webassembly.js' `
     --content-type 'text/javascript' --cache-control $immutable --metadata-directive REPLACE
 
-# (5) CloudFront は 10MB 超を圧縮しない。該当アセット（AOT の native ランタイムが約 19MB）は
-#     publish が生成した .br の中身を同じキーへ上書きする
+# (5) CloudFront does not compress files over 10MB. For those assets (the AOT native runtime is about 19MB),
+#     overwrite the same key with the contents of the .br generated by publish
 Get-ChildItem publish/wwwroot/_framework -File |
     Where-Object { $_.Length -gt 9MB -and $_.Extension -in '.wasm', '.js' } |
     ForEach-Object {
@@ -618,49 +620,49 @@ Get-ChildItem publish/wwwroot/_framework -File |
             --content-encoding br --content-type $type --cache-control $immutable
     }
 
-# (6) キャッシュ無効化（'/*' は 1 パス扱いなので無料枠内）
+# (6) Invalidate the cache ('/*' counts as one path, so it is within the free tier)
 aws cloudfront create-invalidation --distribution-id $o.DistributionId --paths '/*'
 ```
 
-`Template.Backend` を変更した場合は、上記の前に **1. 環境構築の (1)(2)** をやり直す（Lambda コードは CDK のアセットとして配信されるため、`cdk deploy` を通さないと反映されない）。
+If you changed `Template.Backend`, redo **(1)(2) of 1. Building the environment** before the above (the Lambda code is delivered as a CDK asset, so it is not applied without `cdk deploy`).
 
-### 3. ユーザー追加
+### 3. Adding users
 
-セルフサインアップは無効なので、実ユーザーの発行もこの手順で行う。
+Self sign-up is disabled, so real users are also issued with these steps.
 
 ```powershell
 $Email    = 'user1@example.com'
-$Password = '<User Pool のパスワードポリシーを満たす値>'
+$Password = '<a value that meets the password policy of the User Pool>'
 
-# (1) 作成。招待メールは送らずパスワードを直接設定する
+# (1) Create the user. Set the password directly without sending an invitation email
 aws cognito-idp admin-create-user --user-pool-id $o.UserPoolId --username $Email `
     --user-attributes "Name=email,Value=$Email" "Name=email_verified,Value=true" `
     --message-action SUPPRESS
 
-# (2) パスワードを恒久設定（FORCE_CHANGE_PASSWORD 状態を解除する）
+# (2) Set the password permanently (clears the FORCE_CHANGE_PASSWORD state)
 aws cognito-idp admin-set-user-password --user-pool-id $o.UserPoolId --username $Email `
     --password $Password --permanent
 
-# (3) sub を取得。S3 のプレフィックスと IAM の PrincipalTag はこの値をキーにする
+# (3) Get the sub. The S3 prefix and the IAM PrincipalTag use this value as the key
 $sub = ((aws cognito-idp admin-get-user --user-pool-id $o.UserPoolId --username $Email |
     ConvertFrom-Json).UserAttributes | Where-Object Name -eq 'sub').Value
 
-# (4) データを配置
+# (4) Place the data
 aws s3 cp .\localdata\ "s3://$($o.DataBucketName)/users/$sub/" --recursive
 ```
 
-> ⚠️ `--user-attributes` の `Name=...,Value=...` は**必ずクォートで囲む**。囲まないと PowerShell がカンマで分割し、`Invalid parameter` になる。
+> ⚠️ **Always quote** `Name=...,Value=...` of `--user-attributes`. Otherwise PowerShell splits them at the comma, resulting in `Invalid parameter`.
 
-> ⚠️ プレフィックスは必ず `users/{sub}/`。email など sub 以外にすると IAM 条件の `${aws:PrincipalTag/userId}` に一致せず、本人でも `AccessDenied` になる。
+> ⚠️ The prefix must be `users/{sub}/`. Anything other than the sub, such as the email, does not match `${aws:PrincipalTag/userId}` in the IAM condition, and even the user themself gets `AccessDenied`.
 
-**ユーザーを削除する場合**は Cognito と S3 の両方を消す（スタックからは独立しているため、片方だけ残ると孤児データになる）。
+**To delete a user**, delete from both Cognito and S3 (they are independent of the stack, so leaving only one of them creates orphaned data).
 
 ```powershell
 aws cognito-idp admin-delete-user --user-pool-id $o.UserPoolId --username $Email
 aws s3 rm "s3://$($o.DataBucketName)/users/$sub/" --recursive
 ```
 
-### 4. 環境のクリア
+### 4. Clearing the environment
 
 ```powershell
 cd Template.IaC
@@ -668,38 +670,38 @@ npx --yes aws-cdk@latest destroy -c env=dev
 cd ..
 ```
 
-> ⚠️ `destroy` も内部で synth を行うため、**`publish-api/` が存在しないと `Cannot find asset at ...\publish-api` で失敗する**（削除だけしたいのに Lambda の成果物が要る、という直感に反する挙動）。消してしまった場合は `dotnet publish Template.Backend/Template.Backend.csproj -c Release -o publish-api` をやり直してから実行する。
+> ⚠️ `destroy` also runs synth internally, so **it fails with `Cannot find asset at ...\publish-api` if `publish-api/` does not exist** (a counterintuitive behavior that needs the Lambda artifact even though you only want to delete). If you deleted it, redo `dotnet publish Template.Backend/Template.Backend.csproj -c Release -o publish-api` before running it.
 
-**prod は RETAIN + 削除保護**のため、スタック削除の前後に手作業が要る。
+**prod is RETAIN + deletion protection**, so manual work is needed before and after deleting the stack.
 
 ```powershell
-# (1) User Pool の削除保護を外す
+# (1) Remove the deletion protection of the User Pool
 aws cognito-idp update-user-pool --user-pool-id $o.UserPoolId --deletion-protection INACTIVE
 
-# (2) スタックを削除（RETAIN 指定のバケット・User Pool は残る）
+# (2) Delete the stack (the buckets and the User Pool set to RETAIN remain)
 cd Template.IaC; npx --yes aws-cdk@latest destroy -c env=prod; cd ..
 
-# (3) 残ったバケットを空にしてから削除する（中身があると削除できない）
+# (3) Empty the remaining buckets and then delete them (they cannot be deleted while they have contents)
 foreach ($b in $o.AppBucketName, $o.DataBucketName) {
     aws s3 rm "s3://$b" --recursive
     aws s3api delete-bucket --bucket $b
 }
 
-# (4) 残った User Pool とドメイン
+# (4) The remaining User Pool and domain
 aws cognito-idp delete-user-pool-domain --user-pool-id $o.UserPoolId --domain '<domainPrefix>'
 aws cognito-idp delete-user-pool --user-pool-id $o.UserPoolId
 
-# (5) 残った LogGroup（RETAIN 指定のものと、CDK 内蔵 Lambda の暗黙生成分）
+# (5) The remaining LogGroups (those set to RETAIN, and those created implicitly by the Lambda built into CDK)
 aws logs describe-log-groups --query "logGroups[?contains(logGroupName,'template-aws-s3-wasm')].logGroupName" --output text |
     ForEach-Object { $_ -split '\s+' } | Where-Object { $_ } |
     ForEach-Object { aws logs delete-log-group --log-group-name $_ }
 ```
 
-削除後の残骸確認コマンドは[🧹 削除（片付け）](#-削除片付け)を参照。
+For the commands to check for leftovers after the deletion, see [🧹 Removal (cleanup)](#-removal-cleanup).
 
 ---
 
-## 💻 ローカル開発
+## 💻 Local development
 
 ### Template.Frontend
 
@@ -707,7 +709,7 @@ aws logs describe-log-groups --query "logGroups[?contains(logGroupName,'template
 dotnet run --project Template.Frontend
 ```
 
-`http://localhost:5250` で **dev スタックの実 Cognito / S3 に接続**する（エミュレーターは使わない）。localhost のコールバック URL と CORS 許可は dev 環境にのみ設定されている。
+At `http://localhost:5250`, it **connects to the real Cognito / S3 of the dev stack** (no emulator). The localhost callback URL and CORS permission are set only in the dev environment.
 
 ### Template.Backend (Lambda)
 
@@ -715,216 +717,216 @@ dotnet run --project Template.Frontend
 dotnet-lambda-test-tool-10.0 --path Template.Backend
 ```
 
-Web UI が起動し、イベント JSON を与えてブレークポイントデバッグができる。
+A web UI starts, and you can debug with breakpoints by giving event JSON.
 
-> ⚠️ 再現されるのは Lambda ランタイムのみで、**API Gateway の JWT オーソライザーは再現されない**。ローカルではクレームがテストイベントに書いた値になるため、任意の `sub` でユーザー別処理を検証できる一方、**401 で遮断されること自体はローカルでは確認できない**。認証の遮断は実環境の curl で確認する。
+> ⚠️ Only the Lambda runtime is reproduced, and **the JWT authorizer of API Gateway is not**. Locally, the claims are the values written in the test event, so per-user processing can be checked with any `sub`, but **blocking with 401 itself cannot be checked locally**. Check the authentication blocking with curl against the real environment.
 
 ---
 
-## 🧩 拡張方法
+## 🧩 Extending
 
-### Template.Backend (Lambda) 関数を追加する
+### Adding a Template.Backend (Lambda) function
 
-1. `Template.Backend/Functions/` に `[LambdaFunction]` を付けたクラスを追加
-2. 新しい Request / Response 型を `FunctionSerializerContext` に追加（`LambdaSerializer` 属性がアセンブリ単位のため）
-3. `Template.IaC/ApiConstruct.cs` の `AddRoute` を 1 行足す
+1. Add a class with `[LambdaFunction]` to `Template.Backend/Functions/`
+2. Add the new Request / Response types to `FunctionSerializerContext` (because the `LambdaSerializer` attribute is per assembly)
+3. Add one `AddRoute` line to `Template.IaC/ApiConstruct.cs`
 
-ハンドラー名はソースジェネレーターが決める: `{Assembly}::{Namespace}.{Class}_{Method}_Generated::{Method}`
+The source generator determines the handler name: `{Assembly}::{Namespace}.{Class}_{Method}_Generated::{Method}`
 
-publish 出力は全関数で 1 つを共有する。そのため関数が増えると各関数のコールドスタートに他関数のコード分も乗る。数個なら誤差だが、規模が大きくなったらプロジェクト分割 + 共通処理の Core ライブラリ化を検討する。
+All functions share one publish output. So as the functions increase, the cold start of each function also carries the code of the other functions. With a few functions it is negligible, but as the scale grows, consider splitting the project + moving the shared processing into a Core library.
 
-### データを配置する
+### Placing data
 
-任意のシステムから `s3://{DataBucket}/users/{sub}/...` へ配置する。`sub` は User Pool のユーザー ID で、`aws cognito-idp admin-get-user` で取得できる。
+Place data in `s3://{DataBucket}/users/{sub}/...` from any system. `sub` is the user ID of the User Pool, and it can be obtained with `aws cognito-idp admin-get-user`.
 
-`date,value,note` ヘッダーの CSV はグラフ + 集計 + 明細テーブルとして描画される。それ以外のテキストは生の内容が表示される（判定は `Template.Frontend/Application/SeriesParser.cs`）。
+A CSV with the `date,value,note` header is rendered as a chart + summary + detail table. Other text is displayed as raw content (decided in `Template.Frontend/Application/SeriesParser.cs`).
 
-> ⚠️ `AdminGetUser` を呼ぶとそのユーザーが MAU としてカウントされ課金対象になる。一覧目的なら `ListUsers` を使う。
+> ⚠️ Calling `AdminGetUser` counts the user as an MAU and makes it billable. For listing, use `ListUsers`.
 
-### ユーザーを発行する
+### Issuing users
 
-セルフサインアップは無効。`aws cognito-idp admin-create-user` で管理者が発行する（`scripts/seed-user.ps1` と同じ手順）。コマンド列は[🧰 手動での操作手順 - 3. ユーザー追加](#-手動での操作手順)を参照。
+Self sign-up is disabled. Administrators issue users with `aws cognito-idp admin-create-user` (the same steps as `scripts/seed-user.ps1`). For the commands, see [🧰 Manual procedures - 3. Adding users](#-manual-procedures).
 
-### その他の拡張ポイント
+### Other extension points
 
-| 項目 | 概要 |
+| Item | Summary |
 |---|---|
-| アップロード対応 | IAM に本人プレフィックスの `s3:PutObject` を追加し、データバケットの CORS に PUT を許可する |
-| カスタムドメイン | CloudFront + ACM と Cognito カスタムドメインを同一サイト（`app.example.com` / `auth.example.com`）に置く。サイレントトークン更新のサードパーティ Cookie 問題も解消する |
-| CI/CD | GitHub Actions + OIDC ロール。PR で `dotnet build` + `cdk synth`、main への push でデプロイ |
-| Cognito | MFA、脅威保護（Plus プラン）、招待メールによるユーザー発行 |
-| 監査 | S3 サーバーアクセスログ / CloudTrail データイベント |
+| Upload support | Add `s3:PutObject` for the own prefix to IAM, and allow PUT in the CORS of the data bucket |
+| Custom domain | Put CloudFront + ACM and the Cognito custom domain on the same site (`app.example.com` / `auth.example.com`). This also solves the third-party cookie problem of silent token renewal |
+| CI/CD | GitHub Actions + OIDC role. `dotnet build` + `cdk synth` on PRs, and deployment on push to main |
+| Cognito | MFA, threat protection (Plus plan), issuing users with invitation emails |
+| Auditing | S3 server access logs / CloudTrail data events |
 
 ---
 
-## ⚡ パフォーマンス設計
+## ⚡ Performance design
 
-初回表示は「ダウンロード → ランタイムブート → 認証状態の解決」の 3 つの待ちで構成される。
+The first display consists of three waits: "download → runtime boot → resolving the authentication state".
 
-> 📌 計測の注意: ネットワーク計測（リソース取得の完了時刻）だけでは後半 2 つの CPU 実行が見えない。実際、当初はネットワーク完了後もページ表示まで通信ゼロの CPU 実行が続いており、そこが体感の支配要因だった。表示フェーズの遷移は DOM のサンプリングで測ること。また非表示タブはブラウザにスロットリングされ、絶対値が大きく出る。
+> 📌 Note on measurement: network measurement (the completion times of resource fetches) alone does not show the CPU execution of the latter two. In fact, at first, CPU execution with no network traffic continued after the network finished until the page was displayed, and that dominated the perceived time. Measure the transitions of the display phases by sampling the DOM. Also, hidden tabs are throttled by the browser, and the absolute values come out larger.
 
-### キャッシュ（2 段構え）
+### Caching (two tiers)
 
-| 対象 | Cache-Control | 理由 |
+| Target | Cache-Control | Reason |
 |---|---|---|
-| `_framework/` のフィンガープリント付きアセット | `public, max-age=31536000, immutable` | 内容が変わればファイル名が変わるため、古い実体が新しいマニフェストと組み合わさることが原理的に起きない |
-| エントリーポイント（`index.html` / `dotnet.js` / `blazor.webassembly.js` / `appsettings*.json` / `css`） | `no-cache` | 上のファイル名を解決する側。ここが常に最新であることが整合性を担保する |
+| Fingerprinted assets under `_framework/` | `public, max-age=31536000, immutable` | The file name changes when the content changes, so an old file can never be combined with a new manifest |
+| Entry points (`index.html` / `dotnet.js` / `blazor.webassembly.js` / `appsettings*.json` / `css`) | `no-cache` | They resolve the file names above. Keeping them always up to date ensures consistency |
 
-全ファイルを `no-cache` にすると、アクセスのたびに約 70 ファイル分の条件付き GET が発生し再訪が目に見えて遅くなる。**実測では 71 リクエスト → 8 リクエストに減った。**
+With `no-cache` for all files, each access causes conditional GETs for about 70 files, and revisits become noticeably slower. **In measurement, the requests dropped from 71 to 8.**
 
-### 適用済みの施策
+### Applied measures
 
-| 施策 | 効果 |
+| Measure | Effect |
 |---|---|
-| **AOT コンパイル**（`RunAOTCompilation=true`、publish のみ） | 起動時の C# 実行をネイティブ wasm 化。ペイポードは増える（転送ベース 2.5MB → 5.4MB）が immutable キャッシュにより初回限り。ローカルの `dotnet build` には影響しない |
-| **アプリが使用可能になるまでスプラッシュ維持** | index.html と同一のスプラッシュを全画面で描画し、静的スプラッシュ → Blazor 描画 → 最初のページ が 1 つの連続した読み込みに見えるようにする |
-| **`preconnect`**（cognito-idp / cognito-identity） | ランタイム取得中に DNS + TCP + TLS を済ませる。実測で認証時の接続確立コストが 0 になった |
-| **IdentityId のセッションキャッシュ** | ページ読み込みごとの `GetId` が消え、Cognito Identity への呼び出しが 2 回 → 1 回 |
-| **`AmazonS3Client` の再利用** | 呼び出しごとのクライアント構築（エンドポイント解決・署名器の初期化）をやめた |
+| **AOT compilation** (`RunAOTCompilation=true`, publish only) | Turns the C# execution at startup into native wasm. The payload grows (2.5MB → 5.4MB transferred), but only the first time thanks to the immutable cache. It does not affect the local `dotnet build` |
+| **Keep the splash until the app is usable** | Draws the same splash as index.html in full screen so that static splash → Blazor rendering → the first page looks like one continuous load |
+| **`preconnect`** (cognito-idp / cognito-identity) | Completes DNS + TCP + TLS while the runtime is being fetched. In measurement, the connection setup cost at authentication became 0 |
+| **Session cache of the IdentityId** | Removes `GetId` on each page load, reducing the calls to Cognito Identity from 2 to 1 |
+| **Reusing `AmazonS3Client`** | Stopped building a client for each call (endpoint resolution, signer initialization) |
 
-### デプロイ時の処理
+### Processing at deployment
 
-- **publish 前に出力ディレクトリを削除する**。`dotnet publish -o` は出力先を掃除しないため、過去ビルドのフィンガープリント付きアセットが溜まり続ける（実際に S3 のオブジェクトが 300 個まで増えた）
-- **`.br` / `.gz` はアップロードしない**。S3 オリジンではコンテンツネゴシエーションが行われず要求されない（実測でリクエスト 0 件）
-- **10MB 超のアセットは Brotli 圧縮済みボディを同じキーに配置する**（`Content-Encoding: br`）。CloudFront の動的圧縮は 10MB までのため、AOT 化した `dotnet.native.wasm`（約 19MB）が非圧縮で配信されてしまう。**実測 19MB → 3.98MB**
-- `.wasm` / `.js` の Content-Type を明示設定する（環境により `application/octet-stream` と判定され圧縮対象から外れる）
+- **Delete the output directory before publishing**. `dotnet publish -o` does not clean the output, so the fingerprinted assets of past builds keep accumulating (in fact, the S3 objects grew to 300)
+- **Do not upload `.br` / `.gz`**. The S3 origin does no content negotiation, so they are never requested (0 requests in measurement)
+- **For assets over 10MB, place the Brotli-compressed body at the same key** (`Content-Encoding: br`). The dynamic compression of CloudFront is limited to 10MB, so the AOT-compiled `dotnet.native.wasm` (about 19MB) would be delivered uncompressed. **19MB → 3.98MB in measurement**
+- Set the Content-Type of `.wasm` / `.js` explicitly (depending on the environment, they are detected as `application/octet-stream` and excluded from compression)
 
-### 見送った施策
+### Measures not adopted
 
-- **OIDC ディスカバリーの省略** — API 上できない。`OidcProviderOptions.AdditionalProviderParameters` は `string` 値しか受け付けず、メタデータ文書をインラインで渡せない
-- **初回ペイロードの削減** — AWS SDK が大きな割合を占めるが（`AWSSDK.Core` 584KB + `AWSSDK.S3` 199KB + `System.Private.Xml` 371KB、圧縮前）、SigV4 の自前実装や遅延ロードは実装量と保守コストに見合わない
+- **Skipping OIDC discovery** — not possible with the API. `OidcProviderOptions.AdditionalProviderParameters` accepts only `string` values, so the metadata document cannot be passed inline
+- **Reducing the initial payload** — the AWS SDK takes a large share (`AWSSDK.Core` 584KB + `AWSSDK.S3` 199KB + `System.Private.Xml` 371KB, uncompressed), but implementing SigV4 ourselves or lazy loading is not worth the implementation and maintenance cost
 
 ---
 
-## 🛡️ セキュリティ
+## 🛡️ Security
 
-| 項目 | 方針 |
+| Item | Policy |
 |---|---|
-| トークン保管 | Blazor WASM Authentication 既定（sessionStorage）。XSS 対策として CSP を必須とし、外部スクリプトを読み込まない |
-| CSP | `default-src 'self'` を基本に、`connect-src` を Cognito と S3 に限定（API は同一オリジンなので `'self'` で足りる）。`script-src` は `'self' 'wasm-unsafe-eval'`（外部・インラインとも不可）、`frame-ancestors 'none'`。S3 のみリージョン内ワイルドカード（理由は下記） |
-| S3（両バケット） | パブリックアクセス全ブロック + `aws:SecureTransport` 強制 + SSE-S3 |
-| CORS | データバケットのみ。オリジンを CloudFront ドメイン（+ dev は localhost）に限定 |
-| IAM | 認証済みロールは 2 ステートメントのみ。ワイルドカード禁止。Identity Pool のゲストアクセス無効 |
-| Cognito | セルフサインアップ無効・管理者発行 |
-| API | オーソライザーを API 既定に設定し、認可なしルートを作れないようにする。アクセストークンは `AuthorizationMessageHandler` の `authorizedUrls` により **API エンドポイント宛にのみ**付与され、S3 や Cognito へは送られない |
-| 秘密情報 | アプリ・リポジトリに秘密情報を置かない |
+| Token storage | The default of Blazor WASM Authentication (sessionStorage). CSP is required against XSS, and no external scripts are loaded |
+| CSP | Based on `default-src 'self'`, `connect-src` is limited to Cognito and S3 (the API is the same origin, so `'self'` is enough). `script-src` is `'self' 'wasm-unsafe-eval'` (neither external nor inline scripts allowed), and `frame-ancestors 'none'`. Only S3 uses a wildcard within the region (see below for the reason) |
+| S3 (both buckets) | Block all public access + `aws:SecureTransport` enforced + SSE-S3 |
+| CORS | Data bucket only. Origins limited to the CloudFront domain (+ localhost in dev) |
+| IAM | The authenticated role has only two statements. No wildcards. Guest access of the Identity Pool is disabled |
+| Cognito | Self sign-up disabled, issued by administrators |
+| API | The authorizer is the API default, so routes without authorization cannot be created. The access token is attached **only to requests to the API endpoint** by `authorizedUrls` of `AuthorizationMessageHandler`, and it is not sent to S3 or Cognito |
+| Secrets | No secrets in the app or the repository |
 
-### CSP のワイルドカードについて（意図的な選択）
+### About the CSP wildcard (an intentional choice)
 
-`connect-src` のうち S3 だけが `https://*.s3.{region}.amazonaws.com` というリージョン内ワイルドカードになっている。具体的なホスト名に絞ることは**技術的には可能だが採用していない**。
+In `connect-src`, only S3 uses a wildcard within the region: `https://*.s3.{region}.amazonaws.com`. Narrowing it to specific host names is **technically possible but not adopted**.
 
-**API は対応済み**で、CloudFront 配下に置くことで `'self'` に含まれるようになった（同時に CORS プリフライトも不要になった）。
+**The API is already handled**: placing it under CloudFront made it part of `'self'` (and also made the CORS preflight unnecessary).
 
-**S3 を絞れない理由**: バケット名はデプロイ後に確定し、CloudFront から参照すると循環依存になる（バケットの CORS 設定が、この CloudFront のドメインを必要とするため）。絞るには次のいずれかが要る。
+**Why S3 cannot be narrowed**: The bucket names are fixed after deployment, and referring to them from CloudFront creates a circular dependency (because the CORS settings of the bucket need the domain of this CloudFront). Narrowing it needs one of the following.
 
-| 手段 | 副作用 |
+| Means | Side effect |
 |---|---|
-| バケット名を固定する | S3 の名前はグローバルに一意。同じスタック ID を別リージョンへ展開すると衝突する |
-| 2 回デプロイする | 「一連のコマンドで完了する」というテンプレートの前提が崩れる |
+| Fix the bucket names | S3 names are globally unique. Deploying the same stack ID to another region causes a collision |
+| Deploy twice | Breaks the template's premise of "completing with one series of commands" |
 
-**ワイルドカードで許容できる理由**: この指定でも「同一リージョンの S3 以外のあらゆるホスト」は遮断されている。そして `connect-src` はあくまで多層防御の一枚であり、**スクリプトの実行自体を止めているのは `script-src`** で、こちらは外部スクリプトもインラインも一切許可していない。攻撃者がスクリプトを実行できて初めて `connect-src` の差が問題になるが、その前段が塞がれている。設定変更のたびに書き換えが必要になる維持コストに見合わないと判断した。
+**Why the wildcard is acceptable**: Even with this setting, "every host other than S3 in the same region" is blocked. And `connect-src` is only one layer of defense in depth, and **what stops the script execution itself is `script-src`**, which allows neither external nor inline scripts at all. The difference in `connect-src` matters only after an attacker can run a script, and that earlier stage is closed. We judged that narrowing it is not worth the maintenance cost of rewriting it on every configuration change.
 
-> ⚠️ **SPA フォールバックの副作用**: 403 → `index.html` (200) 変換により、アプリバケットに対する実際のアクセス拒否もアプリ画面として返る。仕様として許容している。
+> ⚠️ **Side effect of the SPA fallback**: Because of the 403 → `index.html` (200) conversion, an actual access denial for the app bucket is also returned as the app screen. This is accepted as the specification.
 
 ---
 
-## ⚠️ 実装上の落とし穴
+## ⚠️ Implementation pitfalls
 
-Blazor WASM + AWS の組み合わせで実際に踏んだ問題と対処。**流用時にも同じ制約が効く。**
+Problems actually encountered with the combination of Blazor WASM + AWS, and their solutions. **The same constraints apply when reusing this.**
 
-### AWS SDK は browser-wasm でそのままでは動かない
+### The AWS SDK does not work on browser-wasm as is
 
-2 段階の問題があり、いずれも `AWSConfigs.HttpClientFactory` の差し替え（`Template.Frontend/Application/BrowserHttpClientFactory.cs`）で解決している。
+There are two problems, and both are solved by replacing `AWSConfigs.HttpClientFactory` (`Template.Frontend/Application/BrowserHttpClientFactory.cs`).
 
-1. SDK 既定の HTTP ファクトリが `SocketsHttpHandler` を構成するが、ブラウザでは未対応で `PlatformNotSupportedException` になる。すべての通信は fetch を通す必要があるため `HttpClientHandler` ベースで組む
-2. SDK のアンマーシャラーがレスポンスボディを**同期読み**するが、ブラウザのレスポンスストリームは非同期読みしか対応していない（`net_http_synchronous_reads_not_supported`）。`DelegatingHandler` で事前バッファリングし `MemoryStream` として渡す
+1. The default HTTP factory of the SDK configures `SocketsHttpHandler`, which is not supported in the browser and throws `PlatformNotSupportedException`. All communication must go through fetch, so it is built on `HttpClientHandler`
+2. The unmarshallers of the SDK **read the response body synchronously**, but the response streams of the browser support only asynchronous reads (`net_http_synchronous_reads_not_supported`). A `DelegatingHandler` buffers the body in advance and passes it as a `MemoryStream`
 
-### Cognito の `/logout` は OIDC 標準ではない
+### `/logout` of Cognito is not the OIDC standard
 
-RP-Initiated Logout（`end_session_endpoint`）に対応しておらず、`client_id` + `logout_uri` 方式のみ。認証ライブラリの標準ログアウトフローは使えないため、`SignOutService` で「ローカルセッションと認証情報キャッシュを破棄 → `/logout?client_id=...&logout_uri={アプリURL}` へ遷移」を自前実装している。`logout_uri` はアプリクライアントの Allowed sign-out URLs への登録が必要。
+It does not support RP-Initiated Logout (`end_session_endpoint`), only the `client_id` + `logout_uri` method. The standard logout flow of the authentication library cannot be used, so `SignOutService` implements "discard the local session and the credential cache → navigate to `/logout?client_id=...&logout_uri={app URL}`" on its own. `logout_uri` must be registered in the Allowed sign-out URLs of the app client.
 
-### Cognito ドメインプレフィックスの予約語
+### Reserved words in the Cognito domain prefix
 
-`aws` / `amazon` / `cognito` を含めると作成時に `InvalidRequest` で失敗する。リポジトリ名をそのまま使うと該当することがある。
+Including `aws` / `amazon` / `cognito` fails with `InvalidRequest` at creation. Using the repository name as is may hit this.
 
-### `RemoteAuthenticatorView` の Action バインド
+### Binding Action of `RemoteAuthenticatorView`
 
-`Action="Action"` と書くとリテラル文字列 `"action"` が渡り `Invalid action 'action'` で認証画面が動かない。**`Action="@Action"`** と書く必要がある。
+Writing `Action="Action"` passes the literal string `"action"`, and the authentication screen fails with `Invalid action 'action'`. You must write **`Action="@Action"`**.
 
-### ID トークンの取得はライブラリ内部仕様に依存する
+### Getting the ID token depends on internals of the library
 
-Identity Pool の `GetCredentialsForIdentity` に渡せるのは **ID トークン**だが、`Microsoft.AspNetCore.Components.WebAssembly.Authentication` の C# API はアクセストークンしか公開していない。そのため `OidcTokenAccessor` が、内部の oidc-client-ts が sessionStorage に保存するキー `oidc.user:{authority}:{clientId}` を直接読んでいる。**.NET のメジャーアップデート時はキー形式の互換を再確認すること。**
+What can be passed to `GetCredentialsForIdentity` of the Identity Pool is the **ID token**, but the C# API of `Microsoft.AspNetCore.Components.WebAssembly.Authentication` exposes only the access token. So `OidcTokenAccessor` directly reads the key `oidc.user:{authority}:{clientId}` that the internal oidc-client-ts stores in sessionStorage. **Recheck the compatibility of the key format on major .NET updates.**
 
-### Template.Backend (Lambda) Annotations は `serverless.template` を生成し、抑止できない
+### Template.Backend (Lambda) Annotations generates `serverless.template`, and it cannot be suppressed
 
-`[LambdaFunction]` が 1 つでもあれば無条件に生成される（AWS のジェネレーター実装で条件がそうなっており、MSBuild プロパティ等のオプトアウトは無い。手で削除してもフルビルドで再生成される）。
+It is generated unconditionally if there is even one `[LambdaFunction]` (that is the condition in the generator implementation of AWS, and there is no opt-out such as an MSBuild property. Even if you delete it by hand, a full build regenerates it).
 
-本構成では未使用なうえ、内容（MemorySize 512 / Timeout 30 / **オーソライザーなし**）が実デプロイと食い違うため、誤って `dotnet lambda deploy-serverless` すると**認証なしの重複関数**ができる罠になる。そのため `Template.Backend.csproj` の `RemoveGeneratedServerlessTemplate` ターゲットでビルド後に削除している（`.gitignore` にも保険として登録）。Lambda パッケージには元から混入しない。
+It is not used in this setup, and its contents (MemorySize 512 / Timeout 30 / **no authorizer**) differ from the actual deployment, so it is a trap: running `dotnet lambda deploy-serverless` by mistake creates **duplicate functions without authentication**. So the `RemoveGeneratedServerlessTemplate` target in `Template.Backend.csproj` deletes it after the build (it is also registered in `.gitignore` as a safeguard). It is never included in the Lambda package in the first place.
 
-### Template.Backend (Lambda) Annotations はメソッドを static にできない
+### Template.Backend (Lambda) Annotations does not allow static methods
 
-`[LambdaStartup]` の `ConfigureServices` もハンドラーメソッドも、生成コードがインスタンス経由で呼ぶため static にできない。DI を使わない関数でも同様で、CA1822 を局所的に抑止している。フレームワークが形を強制するもので回避手段はない。
+Neither `ConfigureServices` of `[LambdaStartup]` nor the handler methods can be static, because the generated code calls them through an instance. The same applies to functions that do not use DI, and CA1822 is suppressed locally. The framework enforces this form, and there is no workaround.
 
-### Razor では SVG の `<text>` を直接書けない
+### SVG `<text>` cannot be written directly in Razor
 
-`<text>` は Razor が制御構文のエスケープ用に予約しているため、属性付きで書くとコンパイルエラーになる。`SeriesChart` では軸ラベルのみ組み立て済みマークアップ（`MarkupString`）として出力している。
+`<text>` is reserved by Razor for escaping control syntax, so writing it with attributes causes a compile error. `SeriesChart` outputs only the axis labels as prebuilt markup (`MarkupString`).
 
-### `HttpMethod` の名前衝突（CDK）
+### Name collision of `HttpMethod` (CDK)
 
-`Amazon.CDK.AWS.Apigatewayv2` と `Amazon.CDK.AWS.Lambda` の両方が `HttpMethod` を定義するため、using エイリアスで解決している。
+Both `Amazon.CDK.AWS.Apigatewayv2` and `Amazon.CDK.AWS.Lambda` define `HttpMethod`, so it is resolved with a using alias.
 
-### AOT publish は深いパスで失敗する（Windows）
+### AOT publish fails with deep paths (Windows)
 
-リポジトリを深い階層に置くと、`dotnet publish -c Release` が次のエラーで落ちる。
+If the repository is placed in a deep directory, `dotnet publish -c Release` fails with the following error.
 
 ```
 error : Precompiling failed for ...\obj\Release\net10.0\wasm\for-publish\aot-in\Microsoft.AspNetCore.Components.WebAssembly.Authentication.dll with exit code 1.
 error : Can not open image Microsoft.AspNetCore.Components.WebAssembly.Authentication.dll
 ```
 
-AOT の中間ディレクトリ（`obj/Release/net10.0/wasm/for-publish/aot-in/`）だけで 60 文字近くを消費するため、リポジトリルートが 150 文字程度あると Windows の `MAX_PATH` (260) を超える。**メッセージがパス長を示唆しない**ので原因に辿り着きにくい。`C:\src\{repo}` のような浅い場所へ置けば解消する（`dotnet build` は AOT を通らないため成功してしまい、publish 時だけ露見する）。
+The intermediate AOT directory (`obj/Release/net10.0/wasm/for-publish/aot-in/`) alone uses nearly 60 characters, so with a repository root of about 150 characters, the path exceeds `MAX_PATH` (260) of Windows. **The message does not hint at the path length**, so the cause is hard to find. Placing the repository in a shallow location such as `C:\src\{repo}` solves it (`dotnet build` does not go through AOT and succeeds, so the problem shows up only at publish).
 
 ---
 
-## 💰 ランニングコスト
+## 💰 Running costs
 
-デプロイしたまま置いた場合の月額。ap-northeast-1 / CloudFront は日本向け、2026-08 時点の公開価格（USD・税別）。
+The monthly cost when left deployed. ap-northeast-1 / CloudFront for Japan, public prices as of 2026-08 (USD, excluding tax).
 
-| サービス | デモ運用（3 ユーザー・50 PV/月） | 軽い実運用（100 MAU・1,000 PV・5GB 転送） |
+| Service | Demo use (3 users, 50 PV/month) | Light production use (100 MAU, 1,000 PV, 5GB transfer) |
 |---|---|---|
-| S3（アプリ + データ数 KB） | 約 $0.0007 | 約 $0.01 |
-| CloudFront | $0（無料枠内） | $0（無料枠内） |
-| Cognito User Pool (Essentials) | $0（無料枠内） | $0（無料枠内） |
-| Cognito Identity Pool | $0（常に無料） | $0（常に無料） |
-| Lambda | $0（常時無料枠内） | $0（常時無料枠内） |
-| API Gateway (HTTP API) | $0.00006 | 約 $0.013 |
+| S3 (app + a few KB of data) | About $0.0007 | About $0.01 |
+| CloudFront | $0 (within the free tier) | $0 (within the free tier) |
+| Cognito User Pool (Essentials) | $0 (within the free tier) | $0 (within the free tier) |
+| Cognito Identity Pool | $0 (always free) | $0 (always free) |
+| Lambda | $0 (within the always-free tier) | $0 (within the always-free tier) |
+| API Gateway (HTTP API) | $0.00006 | About $0.013 |
 | CloudFormation / IAM | $0 | $0 |
-| **合計** | **実質 $0（1 セント未満）** | **約 $0.02** |
+| **Total** | **Effectively $0 (less than 1 cent)** | **About $0.02** |
 
-- **無料枠に収まる理由**: CloudFront は月 1TB 転送 + 1,000 万リクエストが恒久無料。Cognito User Pool は Lite / Essentials とも月 10,000 MAU まで恒久無料（Plus は無料枠なし）。Identity Pool は常に無料。Lambda は月 100 万リクエスト + 40 万 GB 秒が恒久無料
-- **API Gateway だけは恒久無料枠がない**（100 万コール無料はアカウント作成から 12 か月限定）。ただし HTTP API は $1.29/100 万リクエストで、REST API の $4.25 に対して約 1/3。上表は無料枠を当てにしない前提の額
-- **バケットや Distribution の「存在」自体に固定費はかからない**
-- API 呼び出しは CloudFront を経由するため CloudFront のリクエスト数にも計上されるが、月 1,000 万リクエストの無料枠があるので上表は変わらない
-- **無料枠が全て無くなったと仮定しても**デモ運用で約 $0.09/月、軽い実運用で約 $2.2/月。大半は Cognito の MAU 課金（$0.015/MAU）で、スケール時の主なコスト要因はここ
-- `PriceClass 200` は日本を含むため必須（`PriceClass 100` は北米・欧州のみで、日本からは遠いエッジに飛ぶ）
-- カスタムドメインを追加すると Route 53 ホストゾーンが約 $0.50/月かかる
+- **Why it fits in the free tier**: CloudFront is permanently free for 1TB of transfer + 10 million requests per month. Cognito User Pool is permanently free up to 10,000 MAU per month for both Lite and Essentials (Plus has no free tier). Identity Pool is always free. Lambda is permanently free for 1 million requests + 400,000 GB-seconds per month
+- **Only API Gateway has no permanent free tier** (1 million free calls are limited to 12 months after the account is created). However, HTTP API costs $1.29 per million requests, about 1/3 of $4.25 for REST API. The table above assumes no free tier
+- **The mere "existence" of buckets and distributions has no fixed cost**
+- API calls go through CloudFront, so they are also counted as CloudFront requests, but with the free tier of 10 million requests per month, the table above does not change
+- **Even assuming that all the free tiers are gone**, it costs about $0.09/month for demo use and about $2.2/month for light production use. Most of it is the MAU charge of Cognito ($0.015/MAU), which is the main cost factor when scaling
+- `PriceClass 200` is required because it includes Japan (`PriceClass 100` covers only North America and Europe, so requests from Japan go to distant edges)
+- Adding a custom domain costs about $0.50/month for a Route 53 hosted zone
 
 ---
 
-## 📋 既知の制約
+## 📋 Known limitations
 
-| 項目 | 内容 |
+| Item | Description |
 |---|---|
-| サイレントトークン更新 | Cognito ドメインがアプリと別サイトのため、サードパーティ Cookie 制限下で iframe 更新が失敗し得る。失敗時は再ログイン誘導で成立させている（60 分セッションを許容）。恒久策はカスタムドメイン |
-| API のトークン種別 | オーソライザーはアクセストークンと ID トークンのどちらも通す。種別を限定したい場合は Lambda 側で `token_use` を確認する |
-| Lambda のコールドスタート | マネージドランタイムのため初回呼び出しに JIT ウォームアップが乗る（実測 700ms 程度）。詰めるなら Native AOT だが、Windows から Linux 向けにビルドするには実質 Docker が要るため採用していない |
-| UI の仮想化 | `ListObjectsV2` は継続トークンで全件取得するが、一覧の仮想化は行っていない。ファイル数が多い用途では要検討 |
-| シードの冪等性 | `seed-user.ps1` は配置のみで既存オブジェクトを消さないため、サンプルデータの構成を変えると旧ファイルが残る |
-| 現在のデプロイ状態 | dev / prod とも一度デプロイして検証したうえで削除済み。AWS 上にスタックは存在しない（初回は[セットアップ](#-セットアップ初回構築)から実施する） |
-| CI/CD | GitHub Actions は未同梱 |
+| Silent token renewal | Because the Cognito domain is a different site from the app, iframe renewal can fail under third-party cookie restrictions. On failure, it works by leading the user to log in again (accepting 60-minute sessions). The permanent fix is a custom domain |
+| Token types of the API | The authorizer accepts both access tokens and ID tokens. To limit the type, check `token_use` in Lambda |
+| Lambda cold start | The managed runtime adds JIT warm-up to the first call (about 700ms measured). Native AOT would reduce it, but building for Linux from Windows practically needs Docker, so it is not adopted |
+| UI virtualization | `ListObjectsV2` gets all items with continuation tokens, but the list is not virtualized. Consider it for uses with many files |
+| Idempotency of the seed | `seed-user.ps1` only places objects and does not delete existing ones, so changing the composition of the sample data leaves old files |
+| Current deployment state | Both dev and prod were deployed and verified once, then removed. No stack exists on AWS (start from [setup](#-setup-initial-build) the first time) |
+| CI/CD | GitHub Actions is not included |
 
 ---
 
-## 📄 ライセンス
+## 📄 License
 
-[LICENSE](LICENSE) を参照。
+See [LICENSE](LICENSE).
