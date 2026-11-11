@@ -2,8 +2,7 @@
 
 [English](README.md) | 日本語
 
-AWS S3 静的ホスティングで動作する Blazor WebAssembly アプリケーションのテンプレート。
-Cognito で認証し、**S3 上の「そのユーザー自身のデータファイル」だけ**を参照できる。認証付きの Lambda API も同梱している。
+[Template](https://usausa.github.io/template/) project for Blazor WebAssembly on AWS S3.
 
 # ✅ 実装
 

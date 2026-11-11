@@ -2,8 +2,7 @@
 
 English | [日本語](README.ja.md)
 
-Template of a Blazor WebAssembly application that runs on AWS S3 static hosting.
-It authenticates with Cognito, and users can read **only "their own data files" on S3**. An authenticated Lambda API is also included.
+[Template](https://usausa.github.io/template/) project for Blazor WebAssembly on AWS S3.
 
 # ✅ Implement
 
