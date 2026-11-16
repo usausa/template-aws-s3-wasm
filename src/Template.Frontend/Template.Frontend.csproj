@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <CodeAnalysisRuleSet>..\..\Analyzers.ruleset</CodeAnalysisRuleSet>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
 
@@ -21,18 +21,18 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="AWSSDK.CognitoIdentity" Version="4.0.100.18" />
-    <PackageReference Include="AWSSDK.S3" Version="4.0.104.4" />
+    <PackageReference Include="AWSSDK.CognitoIdentity" Version="4.1.0" />
+    <PackageReference Include="AWSSDK.S3" Version="4.1.0" />
     <!-- NU1603: CognitoIdentity が要求する版が無いため直接ピンする -->
-    <PackageReference Include="AWSSDK.SecurityToken" Version="4.0.101.4" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.13" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Authentication" Version="10.0.13" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.13" PrivateAssets="all" />
+    <PackageReference Include="AWSSDK.SecurityToken" Version="4.1.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="11.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Authentication" Version="11.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="11.0.0" PrivateAssets="all" />
 
     <!-- Needed for AddHttpClient, which is how an AuthorizationMessageHandler gets an inner
          handler supplied. Attaching the token by hand would mean building the handler chain
          manually for no benefit. -->
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.13" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="11.0.0" />
   </ItemGroup>
 
 </Project>

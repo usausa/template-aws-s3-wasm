@@ -24,7 +24,16 @@ public sealed class OidcTokenAccessor
     // ID token of the current session, or null when signed out.
     public async Task<string?> GetIdTokenAsync()
     {
-        var json = await js.InvokeAsync<string?>("sessionStorage.getItem", storageKey);
+        string? json;
+        try
+        {
+            json = await js.InvokeAsync<string?>("sessionStorage.getItem", storageKey);
+        }
+        catch (JSDisconnectedException)
+        {
+            return null;
+        }
+
         if (String.IsNullOrEmpty(json))
         {
             return null;
@@ -35,8 +44,16 @@ public sealed class OidcTokenAccessor
     }
 
     // Discards the local session on sign-out.
-    public async Task ClearSessionAsync() =>
-        await js.InvokeVoidAsync("sessionStorage.removeItem", storageKey);
+    public async Task ClearSessionAsync()
+    {
+        try
+        {
+            await js.InvokeVoidAsync("sessionStorage.removeItem", storageKey);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
 
     //--------------------------------------------------------------------------------
     // Identity id cache
@@ -48,14 +65,39 @@ public sealed class OidcTokenAccessor
 
     private const string IdentityIdKey = "aws.identityId";
 
-    public async Task<string?> GetCachedIdentityIdAsync() =>
-        await js.InvokeAsync<string?>("sessionStorage.getItem", IdentityIdKey);
+    public async Task<string?> GetCachedIdentityIdAsync()
+    {
+        try
+        {
+            return await js.InvokeAsync<string?>("sessionStorage.getItem", IdentityIdKey);
+        }
+        catch (JSDisconnectedException)
+        {
+            return null;
+        }
+    }
 
-    public async Task SetCachedIdentityIdAsync(string identityId) =>
-        await js.InvokeVoidAsync("sessionStorage.setItem", IdentityIdKey, identityId);
+    public async Task SetCachedIdentityIdAsync(string identityId)
+    {
+        try
+        {
+            await js.InvokeVoidAsync("sessionStorage.setItem", IdentityIdKey, identityId);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
 
-    public async Task ClearCachedIdentityIdAsync() =>
-        await js.InvokeVoidAsync("sessionStorage.removeItem", IdentityIdKey);
+    public async Task ClearCachedIdentityIdAsync()
+    {
+        try
+        {
+            await js.InvokeVoidAsync("sessionStorage.removeItem", IdentityIdKey);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
 }
 
 // oidc-client-ts User object persisted in sessionStorage (only the fields we need).

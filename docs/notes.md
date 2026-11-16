@@ -50,11 +50,11 @@ Identity Pool の `GetCredentialsForIdentity` に渡せるのは **ID トーク�
 リポジトリを深い階層に置くと、`dotnet publish -c Release` が次のエラーで落ちる。
 
 ```
-error : Precompiling failed for ...\obj\Release\net10.0\wasm\for-publish\aot-in\Microsoft.AspNetCore.Components.WebAssembly.Authentication.dll with exit code 1.
+error : Precompiling failed for ...\obj\Release\net11.0\wasm\for-publish\aot-in\Microsoft.AspNetCore.Components.WebAssembly.Authentication.dll with exit code 1.
 error : Can not open image Microsoft.AspNetCore.Components.WebAssembly.Authentication.dll
 ```
 
-AOT の中間ディレクトリ（`obj/Release/net10.0/wasm/for-publish/aot-in/`）だけで 60 文字近くを消費するため、リポジトリルートが 150 文字程度あると Windows の `MAX_PATH` (260) を超える。**メッセージがパス長を示唆しない**ので原因に辿り着きにくい。`C:\src\{repo}` のような浅い場所へ置けば解消する（`dotnet build` は AOT を通らないため成功してしまい、publish 時だけ露見する）。
+AOT の中間ディレクトリ（`obj/Release/net11.0/wasm/for-publish/aot-in/`）だけで 60 文字近くを消費するため、リポジトリルートが 150 文字程度あると Windows の `MAX_PATH` (260) を超える。**メッセージがパス長を示唆しない**ので原因に辿り着きにくい。`C:\src\{repo}` のような浅い場所へ置けば解消する（`dotnet build` は AOT を通らないため成功してしまい、publish 時だけ露見する）。
 
 ## 💰 ランニングコスト
 

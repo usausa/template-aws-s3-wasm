@@ -75,7 +75,7 @@ CloudFormation はこの文字列を検証しないため、アセンブリ名�
 
 ### 必要なもの
 
-- .NET SDK 10.0+
+- .NET SDK 11.0+
 - Node.js 20+（CDK CLI 実行用）
 - AWS CLI v2（認証情報設定済み）
 
@@ -220,7 +220,7 @@ template-aws-s3-wasm/
 │   ├── Assembly.cs                          ← CLSCompliant + LambdaSerializer 属性
 │   └── GlobalUsing.cs / GlobalSuppressions.cs
 │
-├── Template.Frontend/                                ← Blazor WebAssembly (net10.0)
+├── Template.Frontend/                                ← Blazor WebAssembly (net11.0)
 │   ├── Program.cs                           ← DI 構成
 │   ├── Assembly.cs / GlobalUsing.cs / GlobalSuppressions.cs / Log.cs
 │   ├── Application/
