@@ -2,7 +2,6 @@
 
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
-    <CodeAnalysisRuleSet>..\..\Analyzers.ruleset</CodeAnalysisRuleSet>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
 
     <!-- The minimal UI has no reason to ship the ICU CJK data (243KB brotli).

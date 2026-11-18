@@ -204,7 +204,7 @@ aws logs describe-log-groups --query "logGroups[?contains(logGroupName,'template
 
 ```
 template-aws-s3-wasm/
-├── .editorconfig / Analyzers.ruleset / Directory.Build.props / Directory.Build.targets
+├── .editorconfig / .globalconfig / Directory.Build.props / Directory.Build.targets
 ├── AGENTS.md                                ← コーディング規約
 ├── Template.slnx                            ← ソリューション (3 プロジェクト)
 │
