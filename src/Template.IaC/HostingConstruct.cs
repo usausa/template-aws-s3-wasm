@@ -130,7 +130,7 @@ public sealed class HostingConstruct : Construct
             "default-src 'self'; " +
             $"connect-src {connect}; " +
             "script-src 'self' 'wasm-unsafe-eval'; " +
-            "style-src 'self' 'unsafe-inline'; " +
+            "style-src 'self'; " +
             "img-src 'self' data:; " +
             $"frame-src {cognitoDomain}; " +
             "base-uri 'self'; " +

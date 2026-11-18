@@ -207,7 +207,7 @@ sequenceDiagram
 | 項目 | 方針 |
 |---|---|
 | トークン保管 | Blazor WASM Authentication 既定（sessionStorage）。XSS 対策として CSP を必須とし、外部スクリプトを読み込まない |
-| CSP | `default-src 'self'` を基本に、`connect-src` を Cognito と S3 に限定（API は同一オリジンなので `'self'` で足りる）。`script-src` は `'self' 'wasm-unsafe-eval'`（外部・インラインとも不可）、`frame-ancestors 'none'`。S3 のみリージョン内ワイルドカード（理由は下記） |
+| CSP | `default-src 'self'` を基本に、`connect-src` を Cognito と S3 に限定（API は同一オリジンなので `'self'` で足りる）。`script-src` は `'self' 'wasm-unsafe-eval'`（外部・インラインとも不可）、`style-src` は `'self'`（`style` 属性・`<style>` も不可）、`frame-ancestors 'none'`。S3 のみリージョン内ワイルドカード（理由は下記） |
 | S3（両バケット） | パブリックアクセス全ブロック + `aws:SecureTransport` 強制 + SSE-S3 |
 | CORS | データバケットのみ。オリジンを CloudFront ドメイン（+ dev は localhost）に限定 |
 | IAM | 認証済みロールは 2 ステートメントのみ。ワイルドカード禁止。Identity Pool のゲストアクセス無効 |
